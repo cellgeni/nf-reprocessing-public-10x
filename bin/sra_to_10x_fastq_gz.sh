@@ -73,11 +73,11 @@ then
   then 
     rm $SRA*fastq
   fi
-  mv $SRA.tmp1 ${SRA}_1.fastq
-  mv $SRA.tmp2 ${SRA}_2.fastq
+  mv $SRA.tmp1 ${SRA}_S1_L001_R1_001.fastq
+  mv $SRA.tmp2 ${SRA}_S1_L001_R2_001.fastq
   
-  gzip ${SRA}_1.fastq &
-  gzip ${SRA}_2.fastq &
+  gzip ${SRA}_S1_L001_R1_001.fastq &
+  gzip ${SRA}_S1_L001_R2_001.fastq &
   wait 
 else 
   for i in ${SRA}*fastq

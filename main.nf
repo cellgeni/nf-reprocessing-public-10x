@@ -24,7 +24,7 @@ process step1 {
 
   input:
   val(sample)
-  
+ 
   output:
   env(SERIES), emit: series_id
   path("*/*.parsed.tsv"), emit: series_samples_urls_tsv
@@ -36,14 +36,8 @@ process step1 {
   '''
   SERIES=`echo !{sample} | cut -f 1 -d " "`
   SUBSET=`echo !{sample} | cut -f 2 -d " "`
- 
-  #If there is not sample list path present in samplefile then both variables are set to series ID, this is fixed below
-  if [[ "${SERIES}" == "${SUBSET}" ]]; then
-    SUBSET=""
-  fi
 
   ### Step 1: set everything up, collect metadata using ffq/curl from ENA, parse the outputs using custom scripts
-
   if [[ -d "${SERIES}" ]]; then
     >&2 echo "ERROR: Cannot create directory ${SERIES} because it already exists!"
     exit
@@ -51,22 +45,34 @@ process step1 {
     mkdir ${SERIES}
   fi
 
+  cd ${SERIES}
+ 
+  #If there is not sample list path present in samplefile then both variables are set to series ID, this is fixed below
+  if [[ "${SERIES}" == "${SUBSET}" ]]; then
+    SUBSET=""
+  else
+    echo $SUBSET | tr "," "\n" > subset.txt
+  fi
+
   if [[ "${SUBSET}" != "" ]]; then
-    >&2 echo "WARNING: Using file ${SUBSET} to only process select samples!"
-    if [[ `grep "^GSM" ${SUBSET}` == "" && `grep "^SRS" ${SUBSET}` == "" && `grep "^ERS" ${SUBSET}` == "" ]]; then
+    >&2 echo "WARNING: Using ${SUBSET} to only process select samples!"
+    if [[ `grep "^GSM" subset.txt` == "" && `grep "^SRS" subset.txt` == "" && `grep "^ERS" subset.txt` == "" ]]; then
       >&2 echo "ERROR: The subset file ${SUBSET} can only contain GSM, SRS, or ERS IDs!"
       exit 1
     fi
   fi
 
-  cd ${SERIES}
   cp !{projectDir}/bin/curl_ena_metadata.sh .
   
-  !{projectDir}/bin/collect_metadata.sh ${SERIES} ${SUBSET}
+  if [[ -f subset.txt ]]; then
+    !{projectDir}/bin/collect_metadata.sh ${SERIES} subset.txt
+  else
+    !{projectDir}/bin/collect_metadata.sh ${SERIES} ${SUBSET}
+  fi
   ## finally, classify each run into 3 major types:
   ## 1) we have useable 10x paired-end files; 2) we need to get them from 10x BAM; 3) we need to get them from SRA
   ## simultaneously, '$SERIES.urls.list' is generated listing all things that need to be downloaded
-  !{projectDir}/bin/parse_ena_metadata.sh $SERIES > $SERIES.parsed.tsv
+  !{projectDir}/bin/parse_ena_metadata.sh $SERIES | sed "s/^/${SERIES}\t/g" > $SERIES.parsed.tsv
   
   #.command.env is written inside CWD, not work directory set up by nextflow
   #see issue: https://github.com/nextflow-io/nextflow/issues/2812
@@ -78,29 +84,32 @@ process step1 {
 process step2 {
 
   input:
-  tuple env(metadata), env(SERIES)
+  env(metadata)
 
   output:
+  env(SERIES)
   env(SAMPLE)
   path("done_wget/*")
 
   shell:
   '''
-  SAMPLE=`echo ${metadata} | cut -f 1 -d " "`
-  url_path=`echo ${metadata} | cut -f 4 -d " "`
-  ## download all the necessary raw files using 'transfer' queue on Farm. Did we tell you this whole thing is Sanger-specific?
+  SERIES=`echo ${metadata} | cut -f 1 -d " "`
+  SAMPLE=`echo ${metadata} | cut -f 2 -d " "`
+  URL=`echo ${metadata} | cut -f 5 -d " "`
+  FILETYPE=`echo ${metadata} | cut -f 6 -d " "`
+  # download all the necessary raw files using 'transfer' queue on Farm. Did we tell you this whole thing is Sanger-specific?
   COUNT=1
-  ## since this is a part of reprocessing script, we assume all the necessary sub-scripts have been copied already
-
+  
   echo "Iteration 1: downloading the files..."
   echo "--------------------------------------------------------" 
-
-  !{projectDir}/bin/wget_restart.sh ${url_path}
+  
+  !{projectDir}/bin/wget_restart.sh ${URL}
 
   ## they did finish! let's run the cleanup  
   echo "Cleanup 1: running the cleanup script..."
   echo "--------------------------------------------------------" 
-  !{projectDir}/bin/cleanup_wget_downloads.sh ${url_path}
+  
+  !{projectDir}/bin/cleanup_wget_downloads.sh ${URL}
 
   ## let us repeat until no URLs are left in missing_URLs.list
   while [[ -f missing_URL.list ]]
@@ -115,21 +124,33 @@ process step2 {
   ## they did finish! let's run the cleanup again
     echo "Cleanup $COUNT: running the cleanup script..."
     echo "--------------------------------------------------------" 
-    !{projectDir}/bin/cleanup_wget_downloads.sh ${url_path}
+    !{projectDir}/bin/cleanup_wget_downloads.sh ${URL}
   done
 
+  if [ "${FILETYPE}" == "BAM" ]; then
+    mv done_wget/* "done_wget/${SAMPLE}.bam"
+  elif [ "${FILETYPE}" == "GZP"; then
+    echo "need to do move fastqs to correct extension too but need to see how fastqs are passed to metadata"
+    echo "that could change how this process works for fastqs"
+  fi
+  
   echo "FILE DOWNLOAD: ALL DONE!" 
   '''
 }
 
 process step3 {
 
+  publishDir "${params.outdir}/fastqs", mode: "copy"
+  
   input:
+  env(SERIES)
   env(SAMPLE)
   path(BAM_or_SRA)
 
   output:
-  path("*.fastq.gz")
+  env(SERIES), emit: series_id
+  path("*/*.fastq.gz")//, emit: fastq_file
+  //tuple env(SERIES), path("*.fastq.gz")
 
   shell:
   '''
@@ -140,37 +161,48 @@ process step3 {
     bamtofastq --nthreads 16 !{BAM_or_SRA} output
     mv output/*/*.fastq.gz .
     rm -rf output
-    for i in *.fastq.gz; do mv $i “${SAMPLE}${i#bamtofastq}“; done
+    for i in *.fastq.gz; do mv $i "${SAMPLE}${i#bamtofastq}"; done
   fi
   ## if extension = basename then no extension 
   if [[ “${extension}” == “${filename}” ]]; then #assume SRA if no extension
     !{projectDir}/bin/sra_to_10x_fastq_gz.sh !{BAM_or_SRA}
   fi
+  mkdir "${SERIES}"
+  mv *.fastq.gz "${SERIES}" 
   '''
 }
 
 process step4 {
 
-  publishDir "${params.outdir}", mode: "copy"
-
-
+  when:
+  params.run_starsolo
+  
   input:
   env(SERIES)
-  path(fastqs)
 
   output:
-  path("organised_fastqs"), emit: fastqs
+  tuple path("organised_fastqs/*"), env(SERIES)
 
   shell:
   '''
-  mkdir organised_fastqs
+  #This checks if absolute or relative path used for output directory
+  if [[ "!{launchDir}/!{params.outdir}" != "!{params.outdir}" ]]; then
+    metadir="!{launchDir}/!{params.outdir}/metadata"
+    fqdir="!{launchDir}/!{params.outdir}/fastqs"
+  else
+    metadir="!{params.outdir}/metadata"
+    fqdir="!{params.outdir}/fastqs"
+  fi
 
-  SAMPLES=`cat "!{params.outdir}/metadata/${SERIES}/${SERIES}.sample.list"`
-  RUNS=`cat "!{params.outdir}/metadata/${SERIES}/${SERIES}.run.list"`
-  SAMPLE_RUNS="!{params.outdir}/metadata/${SERIES}/${SERIES}.sample_x_run.tsv"
+  ln -s "${fqdir}/${SERIES}/"* .
+  mkdir organised_fastqs
+  
+  SAMPLES=`cat "${metadir}/${SERIES}/${SERIES}.sample.list"`
+  RUNS=`cat "${metadir}/${SERIES}/${SERIES}.run.list"`
+  SAMPLE_RUNS="${metadir}/${SERIES}/${SERIES}.sample_x_run.tsv"
   for i in $RUNS
   do
-    if [[ ! -s "${i}_1.fastq.gz" || ! -s "${i}_2.fastq.gz" ]] 
+    if [ ! -z "$(ls "${i}_*.fastq.gz" 2>/dev/null)" ]
     then
       >&2 echo "WARNING: Run $i does not seem to have two fastq files (or a bamtofastq output directory) associated with it! Please investigate."
     fi
@@ -184,13 +216,13 @@ process step4 {
     for j in $SMPRUNS
     do
       >&2 echo "==> Run $j belongs to sample $i, moving to directory $i.."
-      if [[ -s "${j}_1.fastq.gz" ]]
+      if [ ! "$(ls "${j}_*.fastq.gz" 2>/dev/null)" ]
       then
-        mv ${j}_?.fastq.gz $i
+        mv ${j}_*.fastq.gz $i
       fi
     done
     mv $i organised_fastqs
-    >&2 echo "Moving directory $i to /fastqs.."
+    >&2 echo "Moving directory $i to ./organised_fastqs.."
   done
 
   echo "REORGANISE FASTQS: ALL DONE!"
@@ -199,10 +231,13 @@ process step4 {
 
 process step5 {
 
+  when:
+  params.run_starsolo
+
   publishDir "${params.outdir}/starsolo_results", mode: "copy", pattern: "*_starsolo"
 
   input:
-  tuple env(SAMPLE), path(organised_fastqs), env(SERIES)
+  tuple path(fastq_dir), env(SERIES)
 
   output:
   path("*_starsolo")
@@ -211,13 +246,22 @@ process step5 {
   
   shell:
   '''
-  trimmed_SAMPLE=`echo $SAMPLE | tr -d '\n'`
-  !{projectDir}/bin/starsolo_10x_auto.sh "!{organised_fastqs}" $SERIES ${trimmed_SAMPLE} "!{params.outdir}/metadata/${SERIES}" 
-  !{projectDir}/bin/solo_QC.sh "${trimmed_SAMPLE}_starsolo" > "${trimmed_SAMPLE}.qc.txt"
+  SAMPLE=`echo !{fastq_dir}`
+  #This checks if absolute or relative path used for output directory
+  if [[ "!{launchDir}/!{params.outdir}" != "!{params.outdir}" ]]; then
+    metadir="!{launchDir}/!{params.outdir}/metadata/${SERIES}"
+  else
+    metadir="!{params.outdir}/metadata/${SERIES}"
+  fi
+  !{projectDir}/bin/starsolo_10x_auto.sh "!{fastq_dir}" "${SERIES}" "${SAMPLE}" "${metadir}" 
+  !{projectDir}/bin/solo_QC.sh "${SAMPLE}_starsolo" > "${SAMPLE}.qc.txt"
   '''
 }
 
 process step6 {
+
+  when:
+  params.run_starsolo
 
   publishDir "${params.outdir}/starsolo_results", mode: "copy"
 
@@ -240,8 +284,11 @@ workflow {
   ch_sample_list | flatMap{ it.readLines() } | step1 
   //parallelised downloading urls, ensure all downloads are complete before moving on, ensures all fastqs are generated before running step4 and step5
   //TO DO: change pipeline so STARsolo runs when each run's fastqs are available, not all the fastqs
-  step1.out.series_samples_urls_tsv | splitText | combine(step1.out.series_id) | step2 | step3 | collect | set {ch_fastqs}
-  step4(step1.out.series_id, ch_fastqs)
-  step1.out.series_sample_list | splitText | combine(step4.out.fastqs) | combine(step1.out.series_id) | step5
+  step1.out.series_samples_urls_tsv | splitText | step2 | step3 
+  step3.out.series_id | collect | flatten | unique | step4 | transpose | step5 
   step5.out.qc | collect | step6
+  //step1.out.series_sample_list | splitText | view
+  //step4(step1.out.series_id, ch_fastqs)
+  //step1.out.series_sample_list | splitText | combine(step4.out.fastqs) | combine(step1.out.series_id) | step5
+  //step5.out.qc | collect | step6
 }

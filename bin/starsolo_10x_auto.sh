@@ -8,13 +8,13 @@
 FQBASE=$1
 SERIES=$2
 TAG=$3
-METADATADIR=$4
+METADIR=$4
 
-FQDIR="../${FQBASE}/${TAG}"
+FQDIR="../${FQBASE}"
 
 SHORTSP=""
-RUNS=`grep -w $TAG "${METADATADIR}/${SERIES}.sample_x_run.tsv" | cut -f2 | tr ',' '|'`
-LONGSP=`grep -P "$RUNS" "${METADATADIR}/${SERIES}.parsed.tsv" | cut -f2 | sort | uniq` 
+RUNS=`grep -w $TAG "${METADIR}/${SERIES}.sample_x_run.tsv" | cut -f 2 | tr ',' '|'`
+LONGSP=`grep -P "$RUNS" "${METADIR}/${SERIES}.parsed.tsv" | cut -f 3 | sort | uniq` 
 
 if [[ $LONGSP == "Homo sapiens" ]]
 then
