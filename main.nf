@@ -12,7 +12,8 @@ def errorMessage() {
     This script should take a series ID (GSE from GEO, E-MTAB from ArrayExpress, or PRJ* from bioProjects/SRA),
     pull/parse all relevant metadata, download/reformat all raw read files, and return fully reprocessed count 
     (I won't promise you it will work every time, but I promise you it will try!)
-    In case you don't want all the samples from the series processed, provide a list of samples you do want as 
+    In case you don't want all the samples from the series processed, provide a list of samples you do want as
+    a comma-separated list as a second argument in the sample file  
     (c) Alexander Predeus, Sanger Institute, 2021-2023"
     """.stripIndent()
     exit 1
@@ -149,8 +150,7 @@ process step3 {
 
   output:
   env(SERIES), emit: series_id
-  path("*/*.fastq.gz")//, emit: fastq_file
-  //tuple env(SERIES), path("*.fastq.gz")
+  path("*/*.fastq.gz")
 
   shell:
   '''
@@ -287,8 +287,4 @@ workflow {
   step1.out.series_samples_urls_tsv | splitText | step2 | step3 
   step3.out.series_id | collect | flatten | unique | step4 | transpose | step5 
   step5.out.qc | collect | step6
-  //step1.out.series_sample_list | splitText | view
-  //step4(step1.out.series_id, ch_fastqs)
-  //step1.out.series_sample_list | splitText | combine(step4.out.fastqs) | combine(step1.out.series_id) | step5
-  //step5.out.qc | collect | step6
 }
