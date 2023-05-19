@@ -96,46 +96,55 @@ process step2 {
   '''
   SERIES=`echo ${metadata} | cut -f 1 -d " "`
   SAMPLE=`echo ${metadata} | cut -f 2 -d " "`
-  URL=`echo ${metadata} | cut -f 5 -d " "`
+  URL_INPUT=`echo ${metadata} | cut -f 5 -d " "`
   FILETYPE=`echo ${metadata} | cut -f 6 -d " "`
   # download all the necessary raw files using 'transfer' queue on Farm. Did we tell you this whole thing is Sanger-specific?
   COUNT=1
-  
-  echo "Iteration 1: downloading the files..."
-  echo "--------------------------------------------------------" 
-  
-  !{projectDir}/bin/wget_restart.sh ${URL}
 
-  ## they did finish! let's run the cleanup  
-  echo "Cleanup 1: running the cleanup script..."
-  echo "--------------------------------------------------------" 
-  
-  !{projectDir}/bin/cleanup_wget_downloads.sh ${URL}
+  # split up fastq files if there are more than one into an array
+  if grep -q ";" <<< "${URL_INPUT}"; then
+    arrURL=(${URL_INPUT//;/ }) 
+  else
+    arrURL=(${URL_INPUT})
+  fi
 
-  ## let us repeat until no URLs are left in missing_URLs.list
-  while [[ -f missing_URLs.list ]]
-  do
-    COUNT=$((COUNT+1))
-    echo "Iteration $COUNT: downloading the files..." 
+  for URL in ${arrURL[@]}; do
+    echo "Iteration 1: downloading the files..."
     echo "--------------------------------------------------------" 
-  
-    missing_URL=`cat missing_URLs.list` #should be a list of 1
-    !{projectDir}/bin/wget_restart.sh ${missing_URL}
-   
-  ## they did finish! let's run the cleanup again
-    echo "Cleanup $COUNT: running the cleanup script..."
+
+    !{projectDir}/bin/wget_restart.sh ${URL}
+
+    ## they did finish! let's run the cleanup  
+    echo "Cleanup 1: running the cleanup script..."
     echo "--------------------------------------------------------" 
+
     !{projectDir}/bin/cleanup_wget_downloads.sh ${URL}
+
+    ## let us repeat until no URLs are left in missing_URLs.list
+    while [[ -f missing_URLs.list ]]
+    do
+      COUNT=$((COUNT+1))
+      echo "Iteration $COUNT: downloading the files..." 
+      echo "--------------------------------------------------------" 
+
+      missing_URL=`cat missing_URLs.list` #should be a list of 1
+      !{projectDir}/bin/wget_restart.sh ${URL}
+
+    ## they did finish! let's run the cleanup again
+      echo "Cleanup $COUNT: running the cleanup script..."
+      echo "--------------------------------------------------------" 
+      !{projectDir}/bin/cleanup_wget_downloads.sh ${URL}
+    done
+
+    if [ "${FILETYPE}" == "BAM" ]; then
+      mv done_wget/*.bam* "done_wget/${SAMPLE}.bam"
+    elif [ "${FILETYPE}" == "GZ1" ] || [ [ "${FILETYPE}" == "GZ2" ]; then
+      echo "need to do move fastqs to correct extension too but need to see how fastqs are passed to metadata"
+      echo "that could change how this process works for fastqs"
+    fi
   done
 
-  if [ "${FILETYPE}" == "BAM" ]; then
-    mv done_wget/* "done_wget/${SAMPLE}.bam"
-  elif [ "${FILETYPE}" == "GZP"; then
-    echo "need to do move fastqs to correct extension too but need to see how fastqs are passed to metadata"
-    echo "that could change how this process works for fastqs"
-  fi
-  
-  echo "FILE DOWNLOAD: ALL DONE!" 
+  echo "FILE DOWNLOAD: ALL DONE!"
   '''
 }
 

@@ -8,6 +8,7 @@ then
 fi
 
 URL=$1
+TAG=`basename ${URL%%.fastq.gz}` ## this should work for both SRA (SRR1245 or SRR1245.1 formats), and *_1.fastq.gz/*_2.fastq.gz downloads 
 
 if [[ -d done_wget ]]
 then
@@ -17,20 +18,27 @@ else
   mkdir done_wget
 fi
 
+if [[ -d logs ]]
+then
+  echo "Found directory named 'logs', will use it to move completed downloads!"
+else
+  echo "No directory named 'logs' found! will create it and use to move completed downloads!"
+  mkdir logs
+fi
+
 if [[ -f missing_URLs.list ]] 
 then
   echo "Found file named 'missing_URLS.list'; deleting it.." 
   rm missing_URLs.list
 fi
 
-TAG=`basename $URL`
-TAG=${TAG%%.fastq.gz}  ## this should work for both SRA (SRR1245 or SRR1245.1 formats), and *_1.fastq.gz/*_2.fastq.gz downloads
-if [[ -f "wget.log" ]]
+if [[ -f "${TAG}.wget.log" ]]
 then 
-  SV=`tail "wget.log" | grep -wF saved | wc -l`
+  SV=`tail "${TAG}.wget.log" | grep -wF saved | wc -l`
   if (( $SV == 1 ))
   then
     echo "Sample $TAG was downloaded successfully, moving files to /done_wget!"
+    mv ${TAG}*.wget.log logs
     mv ${TAG}* done_wget
   else 
     AC=$((AC+1)) 

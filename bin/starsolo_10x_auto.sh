@@ -103,20 +103,20 @@ R2LEN=`cat test.R2.fastq | awk 'NR%4==2' | awk '{sum+=length($0)} END {printf "%
 R1DIS=`cat test.R1.fastq | awk 'NR%4==2' | awk '{print length($0)}' | sort | uniq -c | wc -l`
 
 ## elucidate the right barcode whitelist to use. Grepping out N saves us some trouble. Note the special list for multiome experiments (737K-arc-v1.txt):
-if (( $NBC2 > 80000 )) 
+if (( $NBC2 > 20000 )) 
 then 
   BC=$WL/737K-august-2016.txt
-elif (( $NBC3 > 80000 ))
+elif (( $NBC3 > 20000 ))
 then
   BC=$WL/3M-february-2018.txt
-elif (( $NBCA > 80000 ))
+elif (( $NBCA > 20000 ))
 then
   BC=$WL/737K-arc-v1.txt
-elif (( $NBC1 > 80000 )) 
+elif (( $NBC1 > 20000 )) 
 then
   BC=$WL/737K-april-2014_rc.txt
 else 
-  >&2 echo "ERROR: No whitelist has matched a random selection of 200,000 barcodes! Match counts: $NBC1 (v1), $NBC2 (v2), $NBC3 (v3), $NBCA (multiome)."
+  >&2 echo "ERROR: No whitelist has matched a random selection of 80,000 barcodes! Match counts: $NBC1 (v1), $NBC2 (v2), $NBC3 (v3), $NBCA (multiome)."
   exit 1
 fi 
 
