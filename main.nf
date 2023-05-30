@@ -150,31 +150,36 @@ process step2 {
 
 process step3 {
 
-  publishDir "${params.outdir}/fastqs", mode: "copy"
-  
   input:
   env(SERIES)
   env(SAMPLE)
-  path(BAM_or_SRA)
+  path(infiles)
 
   output:
-  env(SERIES), emit: series_id
-  path("*/*.fastq.gz")
+  tuple env(SERIES), path("*/*.fastq.gz")
 
   shell:
   '''
-  filename=`basename !{BAM_or_SRA}`
+  filetype=`echo !{infiles} | cut -f 1 -d " "`
+  filename=`basename ${filetype}`
   extension="${filename##*.}"
   if [[ “${extension}” == “bam” ]]; then
   ## this has to be 10x bamtofastq, ideally the latest version
-    bamtofastq --nthreads 16 !{BAM_or_SRA} output
+    bamtofastq --nthreads 16 ${filetype} output
     mv output/*/*.fastq.gz .
     rm -rf output
     for i in *.fastq.gz; do mv $i "${SAMPLE}${i#bamtofastq}"; done
   fi
   ## if extension = basename then no extension 
   if [[ “${extension}” == “${filename}” ]]; then #assume SRA if no extension
-    !{projectDir}/bin/sra_to_10x_fastq_gz.sh !{BAM_or_SRA}
+    !{projectDir}/bin/sra_to_10x_fastq_gz.sh ${filetype}
+  fi
+  ## if extension = gz then assume fastqs and simply rename them 
+  if [[ “${extension}” == “gz” ]]; then
+    for fq in *.fastq.gz; do
+      prefix="${fq%%_*}" #get part of file before the read identifier, NOTE: doesn't work if sample name has underscore
+      mv $fq "${SAMPLE}${fq#${prefix}}"
+    done
   fi
   mkdir "${SERIES}"
   mv *.fastq.gz "${SERIES}" 
@@ -183,32 +188,22 @@ process step3 {
 
 process step4 {
 
-  when:
-  params.run_starsolo
-  
+  publishDir "${params.outdir}", mode: "copy"
+
   input:
-  env(SERIES)
+  tuple env(SERIES), path(fastqs)
 
   output:
-  tuple path("organised_fastqs/*"), env(SERIES)
+  tuple path("organised_fastqs/*"), env(SERIES), emit: org_fq
 
   shell:
   '''
-  #This checks if absolute or relative path used for output directory
-  if [[ "!{launchDir}/!{params.outdir}" != "!{params.outdir}" ]]; then
-    metadir="!{launchDir}/!{params.outdir}/metadata"
-    fqdir="!{launchDir}/!{params.outdir}/fastqs"
-  else
-    metadir="!{params.outdir}/metadata"
-    fqdir="!{params.outdir}/fastqs"
-  fi
-
-  ln -s "${fqdir}/${SERIES}/"* .
   mkdir organised_fastqs
   
-  SAMPLES=`cat "${metadir}/${SERIES}/${SERIES}.sample.list"`
-  RUNS=`cat "${metadir}/${SERIES}/${SERIES}.run.list"`
-  SAMPLE_RUNS="${metadir}/${SERIES}/${SERIES}.sample_x_run.tsv"
+  SAMPLES=`cat "!{launchDir}/!{params.outdir}/metadata/${SERIES}/${SERIES}.sample.list"`
+  RUNS=`cat "!{launchDir}/!{params.outdir}/metadata/${SERIES}/${SERIES}.run.list"`
+  SAMPLE_RUNS="!{launchDir}/!{params.outdir}/metadata/${SERIES}/${SERIES}.sample_x_run.tsv"
+
   for i in $RUNS
   do
     if [ ! -z "$(ls "${i}_*.fastq.gz" 2>/dev/null)" ]
@@ -293,7 +288,8 @@ workflow {
   ch_sample_list | flatMap{ it.readLines() } | step1 
   //parallelised downloading urls, ensure all downloads are complete before moving on, ensures all fastqs are generated before running step4 and step5
   //TO DO: change pipeline so STARsolo runs when each run's fastqs are available, not all the fastqs
-  step1.out.series_samples_urls_tsv | splitText | step2 | step3 
-  step3.out.series_id | collect | flatten | unique | step4 | transpose | step5 
+  //below step groups fastqs series id, then creates tuple of seriesid and all fastqs which are passed to step4
+  step1.out.series_samples_urls_tsv | splitText | step2 | step3 | groupTuple | map ({ it -> [it.first(), it.tail().flatten()] }) | step4 
+  step4.out.org_fq | transpose | step5
   step5.out.qc | collect | step6
 }

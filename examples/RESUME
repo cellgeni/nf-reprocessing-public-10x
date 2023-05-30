@@ -2,14 +2,12 @@
 
 set -euo pipefail
 
-samplefile="/nfs/cellgeni/tickets/tic-2063/actions/sample.list"
+samplefile="actions/sample.list"
 
 [[ -e "$samplefile" ]] || (echo "File "$samplefile" not found" && false)
 
-nextflow run /nfs/cellgeni/tickets/tic-2063/actions/main.nf \
+nextflow run cellgeni/nf-reprocessing-public-10x \
   --samplefile $samplefile \
-  --outdir /lustre/scratch127/cellgen/cellgeni/tickets/tic-2063/output \
   -w work \
-  -with-trace reports/trace.txt \
   --ansi-log false \
   -resume
