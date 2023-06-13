@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-samplefile="actions/sample.list"
+samplefile="./sample.list"
 
 [[ -e "$samplefile" ]] || (echo "File "$samplefile" not found" && false)
 

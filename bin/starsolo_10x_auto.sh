@@ -8,13 +8,15 @@
 FQBASE=$1
 SERIES=$2
 TAG=$3
-METADIR=$4
+SAMPLES_RUNS=$4
+SERIES_TSV=$5
+KEEP_BAMS=$6
 
 FQDIR="../${FQBASE}"
 
 SHORTSP=""
-RUNS=`grep -w $TAG "${METADIR}/${SERIES}.sample_x_run.tsv" | cut -f 2 | tr ',' '|'`
-LONGSP=`grep -P "$RUNS" "${METADIR}/${SERIES}.parsed.tsv" | cut -f 3 | sort | uniq` 
+RUNS=`grep -w $TAG "${SAMPLES_RUNS}" | cut -f 2 | tr ',' '|'`
+LONGSP=`grep -P "$RUNS" "${SERIES_TSV}" | cut -f 3 | sort | uniq` 
 
 if [[ $LONGSP == "Homo sapiens" ]]
 then
@@ -38,9 +40,12 @@ CPUS=16                                                                ## typica
 REF=/nfs/cellgeni/STAR/$SHORTSP/2020A/index                               ## choose the appropriate reference 
 WL=/nfs/cellgeni/STAR/whitelists                                       ## directory with all barcode whitelists
 
-## choose one of the two otions, depending on whether you need a BAM file 
-#BAM="--outSAMtype BAM SortedByCoordinate --outBAMsortingThreadN 2 --limitBAMsortRAM 120000000000 --outMultimapperOrder Random --runRNGseed 1 --outSAMattributes NH HI AS nM CB UB GX GN"
-BAM="--outSAMtype None"
+## choose one of the two options, depending on whether you need a BAM file 
+if [[ "$KEEP_BAMS" = true ]]; then
+  BAM="--outSAMtype BAM SortedByCoordinate --outBAMsortingBinsN 500 --limitBAMsortRAM 60000000000 --outMultimapperOrder Random --runRNGseed 1 --outSAMattributes NH HI AS nM CB UB CR CY UR UY GX GN"
+else
+  BAM="--outSAMtype None"
+fi
 
 ###################################################################### DONT CHANGE OPTIONS BELOW THIS LINE ##############################################################################################
 
@@ -235,5 +240,4 @@ do
   cd ../../
 done
 
-wait
 echo "ALL DONE!"

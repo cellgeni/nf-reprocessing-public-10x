@@ -27,7 +27,9 @@ process step1 {
   val(sample)
  
   output:
-  env(SERIES), emit: series_id
+  //Want to copy all metadata to output but need specific files for later processes
+  path("*")
+  tuple env(SERIES), path("*/*.sample_x_run.tsv"), path("*/*.parsed.tsv"), emit: series_metadata
   path("*/*.parsed.tsv"), emit: series_samples_urls_tsv
   path("*/*.sample.list"), emit: series_sample_list
   path("*/*.run.list"), emit: series_run_list
@@ -75,6 +77,9 @@ process step1 {
   ## simultaneously, '$SERIES.urls.list' is generated listing all things that need to be downloaded
   !{projectDir}/bin/parse_ena_metadata.sh $SERIES | sed "s/^/${SERIES}\t/g" > $SERIES.parsed.tsv
   
+  ## do not want curl_ena_mtadata.sh script in output so once used, remove it
+  rm curl_ena_metadata.sh
+
   #.command.env is written inside CWD, not work directory set up by nextflow
   #see issue: https://github.com/nextflow-io/nextflow/issues/2812
   #solution is to change back up a directory
@@ -191,18 +196,22 @@ process step4 {
   publishDir "${params.outdir}", mode: "copy"
 
   input:
-  tuple env(SERIES), path(fastqs)
+  path(sample_list)
+  path(run_list)
+  path(sample_run_list)
+  tuple env(SERIES), path(in_fqs)
+
 
   output:
-  tuple path("organised_fastqs/*"), env(SERIES), emit: org_fq
-
+  tuple env(SERIES), path("fastqs/*/*"), emit: org_fq
+  
   shell:
   '''
-  mkdir organised_fastqs
+  mkdir -p "fastqs/${SERIES}"
   
-  SAMPLES=`cat "!{launchDir}/!{params.outdir}/metadata/${SERIES}/${SERIES}.sample.list"`
-  RUNS=`cat "!{launchDir}/!{params.outdir}/metadata/${SERIES}/${SERIES}.run.list"`
-  SAMPLE_RUNS="!{launchDir}/!{params.outdir}/metadata/${SERIES}/${SERIES}.sample_x_run.tsv"
+  SAMPLES=`cat "!{sample_list}"`
+  RUNS=`cat "!{run_list}"`
+  SAMPLE_RUNS="!{sample_run_list}"
 
   for i in $RUNS
   do
@@ -225,8 +234,8 @@ process step4 {
         mv ${j}_*.fastq.gz $i
       fi
     done
-    mv $i organised_fastqs
-    >&2 echo "Moving directory $i to ./organised_fastqs.."
+    mv $i "fastqs/${SERIES}"
+    >&2 echo "Moving directory $i to ./fastqs/${SERIES}"
   done
 
   echo "REORGANISE FASTQS: ALL DONE!"
@@ -238,26 +247,22 @@ process step5 {
   when:
   params.run_starsolo
 
-  publishDir "${params.outdir}/starsolo_results", mode: "copy", pattern: "*_starsolo"
 
   input:
-  tuple path(fastq_dir), env(SERIES)
+  tuple env(SERIES), path(fastq_dir), path(series_runs), path(series_tsv)
 
   output:
-  path("*_starsolo")
+  path("*_starsolo"), emit: ss
   path("*.qc.txt"), emit: qc
-  
   
   shell:
   '''
   SAMPLE=`echo !{fastq_dir}`
-  #This checks if absolute or relative path used for output directory
-  if [[ "!{launchDir}/!{params.outdir}" != "!{params.outdir}" ]]; then
-    metadir="!{launchDir}/!{params.outdir}/metadata/${SERIES}"
+  if [[ !{params.keep_bams} = true ]]; then
+    !{projectDir}/bin/starsolo_10x_auto.sh "!{fastq_dir}" "${SERIES}" "${SAMPLE}" "!{series_runs}" "!{series_tsv}" "true"
   else
-    metadir="!{params.outdir}/metadata/${SERIES}"
+    !{projectDir}/bin/starsolo_10x_auto.sh "!{fastq_dir}" "${SERIES}" "${SAMPLE}" "!{series_runs}" "!{series_tsv}" "false"
   fi
-  !{projectDir}/bin/starsolo_10x_auto.sh "!{fastq_dir}" "${SERIES}" "${SAMPLE}" "${metadir}" 
   !{projectDir}/bin/solo_QC.sh "${SAMPLE}_starsolo" > "${SAMPLE}.qc.txt"
   '''
 }
@@ -267,19 +272,21 @@ process step6 {
   when:
   params.run_starsolo
 
-  publishDir "${params.outdir}/starsolo_results", mode: "copy"
-
   input:
+  path(starsolo_dirs)
   path(qc_files)
 
   output:
-  path('qc.tsv')
+  path('starsolo_results/*')
 
   shell:
   '''
   #create singular file with qc of every sample
   echo -e "Sample\tRd_all\tRd_in_cells\tFrc_in_cells\tUMI_in_cells\tCells\tMed_nFeature\tGood_BC\tWL\tSpecies\tPaired\tStrand\tall_u+m\tall_u\texon_u+m\texon_u\tfull_u+m\tfull_u" > qc.tsv
   tail -n 1 *qc.txt | grep starsolo >> qc.tsv
+  mkdir starsolo_results
+  mv *_starsolo starsolo_results
+  mv qc.tsv starsolo_results
   '''
 }
 
@@ -288,8 +295,12 @@ workflow {
   ch_sample_list | flatMap{ it.readLines() } | step1 
   //parallelised downloading urls, ensure all downloads are complete before moving on, ensures all fastqs are generated before running step4 and step5
   //TO DO: change pipeline so STARsolo runs when each run's fastqs are available, not all the fastqs
-  //below step groups fastqs series id, then creates tuple of seriesid and all fastqs which are passed to step4
-  step1.out.series_samples_urls_tsv | splitText | step2 | step3 | groupTuple | map ({ it -> [it.first(), it.tail().flatten()] }) | step4 
-  step4.out.org_fq | transpose | step5
-  step5.out.qc | collect | step6
+  //below step groups fastqs series id, then creates tuple of series id and all fastqs which are passed to step4
+  step1.out.series_samples_urls_tsv | splitText | step2 | step3 | groupTuple | map ({ it -> [it.first(), it.tail().flatten()] }) | set { ch4 }
+  step4(step1.out.series_sample_list, step1.out.series_run_list, step1.out.series_sample_run_tsv, ch4)
+  //below adds the series_samples_urls_tsv and series_sample_run_tsv to each set of fastqs before transposing so each tuple is its own channel
+  step4.out.org_fq | join( step1.out.series_metadata ) | transpose | step5
+  step5.out.ss | collect | set { step5_ss }
+  step5.out.qc | collect | set { step5_qc }
+  step6(step5_ss, step5_qc) | flatten |  subscribe { it -> itname = it.getName(); it.copyTo("${params.outdir}/starsolo_results/${itname}") } 
 }
