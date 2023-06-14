@@ -2,12 +2,11 @@
 
 set -euo pipefail
 
-samplefile="./sample.list"
+samplefile="/path/to/sample.list"
 
 [[ -e "$samplefile" ]] || (echo "File "$samplefile" not found" && false)
 
 nextflow run cellgeni/nf-reprocessing-public-10x \
   --samplefile $samplefile \
-  -w work \
   --ansi-log false \
   -resume
