@@ -183,7 +183,9 @@ process step3 {
   if [[ “${extension}” == “gz” ]]; then
     for fq in *.fastq.gz; do
       prefix="${fq%%_*}" #get part of file before the read identifier, NOTE: doesn't work if sample name has underscore
-      mv $fq "${SAMPLE}${fq#${prefix}}"
+      if [[ $prefix != ${SAMPLE} ]]; then
+        mv $fq "${SAMPLE}${fq#${prefix}}"
+      fi
     done
   fi
   mkdir "${SERIES}"
