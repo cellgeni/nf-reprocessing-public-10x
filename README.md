@@ -14,3 +14,4 @@ Nextflow pipeline of Alex's reprocessing [repo](https://github.com/cellgeni/repr
 * `--outdir` - The path to where the results will be saved.
 * `--run_starsolo` - Tells pipeline whether to realign data with STARsolo or not
 * `--keep_bams` - Tells the pipeline whether to generate BAM files (default false means do not generate).
+* `--sort_bam_mem` - Input memory (IN BYTES) for starsolo to use for sorting BAM files if BAM files are kept (default 60GB = 60000000000B).
