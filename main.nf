@@ -173,7 +173,7 @@ process step3 {
     bamtofastq --nthreads 16 ${filetype} output
     mv output/*/*.fastq.gz .
     rm -rf output
-    for i in *.fastq.gz; do mv $i "!{SAMPLE}${i#bamtofastq}"; done
+    for i in *.fastq.gz; do mv $i "${SAMPLE}${i#bamtofastq}"; done
   fi
   ## if extension = basename then no extension 
   if [[ "${extension}" == "${filename}" ]]; then #assume SRA if no extension
@@ -182,14 +182,14 @@ process step3 {
   ## if filename contains "fastq" or "fq" then treat it as a fastq
   if [[ "${filename}" == *"fastq"* ]] || [[ "${filename}" == *"fq"* ]]; then
     for fq in *.f*q*; do
-      !{projectDir}/bin/sorting-fastqs.sh "!{SAMPLE}" "${fq}"
+      !{projectDir}/bin/sorting-fastqs.sh "${SAMPLE}" "${fq}"
     done
   fi
   # move to SERIES directory
-  mkdir "!{SERIES}"
-  mv *.gz "!{SERIES}"
+  mkdir "${SERIES}"
+  mv *.gz "${SERIES}"
   # compress any non-compressed fastqs
-  find "!{SERIES}"/* | while read i; do if [[ $i != *".gz" ]]; then gzip $i; fi; done
+  find "${SERIES}"/* | while read i; do if [[ $i != *".gz" ]]; then gzip $i; fi; done
   '''
 }
 
