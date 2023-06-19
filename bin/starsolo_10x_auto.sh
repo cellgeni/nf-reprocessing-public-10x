@@ -11,6 +11,7 @@ TAG=$3
 SAMPLES_RUNS=$4
 SERIES_TSV=$5
 KEEP_BAMS=$6
+BAM_RAM=$7
 
 FQDIR="../${FQBASE}"
 
@@ -42,7 +43,7 @@ WL=/nfs/cellgeni/STAR/whitelists                                       ## direct
 
 ## choose one of the two options, depending on whether you need a BAM file 
 if [[ "$KEEP_BAMS" = true ]]; then
-  BAM="--outSAMtype BAM SortedByCoordinate --outBAMsortingBinsN 500 --limitBAMsortRAM 60000000000 --outMultimapperOrder Random --runRNGseed 1 --outSAMattributes NH HI AS nM CB UB CR CY UR UY GX GN"
+  BAM="--outSAMtype BAM SortedByCoordinate --outBAMsortingBinsN 500 --limitBAMsortRAM ${BAM_RAM} --outMultimapperOrder Random --runRNGseed 1 --outSAMattributes NH HI AS nM CB UB CR CY UR UY GX GN"
 else
   BAM="--outSAMtype None"
 fi

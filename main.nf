@@ -168,28 +168,28 @@ process step3 {
   filetype=`echo !{infiles} | cut -f 1 -d " "`
   filename=`basename ${filetype}`
   extension="${filename##*.}"
-  if [[ “${extension}” == “bam” ]]; then
+  if [[ "${extension}" == "bam" ]]; then
   ## this has to be 10x bamtofastq, ideally the latest version
     bamtofastq --nthreads 16 ${filetype} output
     mv output/*/*.fastq.gz .
     rm -rf output
-    for i in *.fastq.gz; do mv $i "${SAMPLE}${i#bamtofastq}"; done
+    for i in *.fastq.gz; do mv $i "!{SAMPLE}${i#bamtofastq}"; done
   fi
   ## if extension = basename then no extension 
-  if [[ “${extension}” == “${filename}” ]]; then #assume SRA if no extension
+  if [[ "${extension}" == "${filename}" ]]; then #assume SRA if no extension
     !{projectDir}/bin/sra_to_10x_fastq_gz.sh ${filetype}
   fi
-  ## if extension = gz then assume fastqs and simply rename them 
-  if [[ “${extension}” == “gz” ]]; then
-    for fq in *.fastq.gz; do
-      prefix="${fq%%_*}" #get part of file before the read identifier, NOTE: doesn't work if sample name has underscore
-      if [[ $prefix != ${SAMPLE} ]]; then
-        mv $fq "${SAMPLE}${fq#${prefix}}"
-      fi
+  ## if filename contains "fastq" or "fq" then treat it as a fastq
+  if [[ "${filename}" == *"fastq"* ]] || [[ "${filename}" == *"fq"* ]]; then
+    for fq in *.f*q*; do
+      !{projectDir}/bin/sorting-fastqs.sh "!{SAMPLE}" "${fq}"
     done
   fi
-  mkdir "${SERIES}"
-  mv *.fastq.gz "${SERIES}" 
+  # move to SERIES directory
+  mkdir "!{SERIES}"
+  mv *.gz "!{SERIES}"
+  # compress any non-compressed fastqs
+  find "!{SERIES}"/* | while read i; do if [[ $i != *".gz" ]]; then gzip $i; fi; done
   '''
 }
 
@@ -261,9 +261,9 @@ process step5 {
   '''
   SAMPLE=`echo !{fastq_dir}`
   if [[ !{params.keep_bams} = true ]]; then
-    !{projectDir}/bin/starsolo_10x_auto.sh "!{fastq_dir}" "${SERIES}" "${SAMPLE}" "!{series_runs}" "!{series_tsv}" "true"
+    !{projectDir}/bin/starsolo_10x_auto.sh "!{fastq_dir}" "${SERIES}" "${SAMPLE}" "!{series_runs}" "!{series_tsv}" "true" "!{params.sort_bam_mem}"
   else
-    !{projectDir}/bin/starsolo_10x_auto.sh "!{fastq_dir}" "${SERIES}" "${SAMPLE}" "!{series_runs}" "!{series_tsv}" "false"
+    !{projectDir}/bin/starsolo_10x_auto.sh "!{fastq_dir}" "${SERIES}" "${SAMPLE}" "!{series_runs}" "!{series_tsv}" "false" "!{params.sort_bam_mem}"
   fi
   !{projectDir}/bin/solo_QC.sh "${SAMPLE}_starsolo" > "${SAMPLE}.qc.txt"
   '''
