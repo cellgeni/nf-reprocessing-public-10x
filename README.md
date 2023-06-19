@@ -5,7 +5,7 @@ Nextflow pipeline of Alex's reprocessing [repo](https://github.com/cellgeni/repr
 * `main.nf` - the Nextflow pipeline that executes reprocessing.
 * `nextflow.config` - the configuration script that allows the processes to be submitted to IBM LSF on Sanger's HPC and ensures correct environment is set via singularity container (this is an absolute path). Global default parameters are also set in this file and some contain absolute paths.
 * `examples/samples.list` - example of the expected samplefile containing series IDs and optionally sample IDs.
-* `examples/RESUME` - an example run script that executes the pipeline it has 2 hardcoded arguments: `/path/to/sample.list. 
+* `examples/RESUME` - an example run script that executes the pipeline it has 1 hardcoded argument: `/path/to/sample.list` which you will need to change on your installation. 
 * `bin` - a directory containing various scripts the pipeline uses to download project data and realign the data with STARsolo.
 * `Dockerfile` - a dockerfile to reproduce the environment for step3, step5 has its own container that has its Dockerfile located [here](https://github.com/cellgeni/STARsolo/blob/main/Dockerfile)
 
