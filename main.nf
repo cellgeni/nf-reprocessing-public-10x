@@ -182,7 +182,7 @@ process step3 {
   ## if filename contains "fastq" or "fq" then treat it as a fastq
   if [[ "${filename}" == *"fastq"* ]] || [[ "${filename}" == *"fq"* ]]; then
     for fq in *.f*q*; do
-      !{projectDir}/bin/sorting-fastqs.sh "${SAMPLE}" "${fq}"
+      !{projectDir}/bin/sorting_fastqs.sh "${SAMPLE}" "${fq}"
     done
   fi
   # move to SERIES directory
