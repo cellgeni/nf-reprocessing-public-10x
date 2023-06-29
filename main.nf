@@ -338,6 +338,7 @@ process email_finish {
 }
 
 workflow { 
+  email_startup()
   ch_sample_list = params.samplefile != null ? Channel.fromPath(params.samplefile) : errorMessage()
   ch_sample_list | flatMap{ it.readLines() } | step1 
   //parallelised downloading urls, ensure all downloads are complete before moving on, ensures all fastqs are generated before running step4 and step5
