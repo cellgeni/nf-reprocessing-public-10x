@@ -23,13 +23,13 @@ process email_startup {
   
   shell:
   '''
-  contents=`cat !{params.SAMPLEFILE}`
+  contents=`cat !{params.samplefile}`
   sendmail "!{params.sangerID}@sanger.ac.uk" <<EOF
   Subject: Launched pipeline
   From: noreply-cellgeni-pipeline@sanger.ac.uk
   Hi there, you've launched Cellular Genetics Informatics' Reprocessing pipeline.
   Your parameters are:
-  Samplefile: !{params.SAMPLEFILE}
+  Samplefile: !{params.samplefile}
   Run STARsolo: !{params.run_starsolo}
   Keep BAMs: !{params.keep_bams}
   Sorting BAM memory (in bytes): !{params.sort_bam_mem}
