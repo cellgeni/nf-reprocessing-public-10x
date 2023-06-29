@@ -355,11 +355,6 @@ workflow {
   step5.out.qc | collect | set { step5_qc }
   step6(step5_ss, step5_qc) 
   step6.out.results | flatten |  subscribe { it -> itname = it.getName(); it.copyTo("/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/${params.sangerID}/${params.timestamp}/reprocessing-results/starsolo/${itname}") }
-  //Conditions to ensure finishing email is sent after final process depending on whether starsolo is ran or not
-  if (params.run_starsolo == false) {
-    email_finish(step4.out.id)
-  }
-  if (params.run_starsolo == true) {
-    email_finish(step6.out.qc)
-  }
+  //Ternary operator to ensure finishing email is sent after final process depending on whether starsolo is ran or not
+  params.run_starsolo == true ? email_finish(step6.out.qc) : email_finish(step4.out.id 
 }
