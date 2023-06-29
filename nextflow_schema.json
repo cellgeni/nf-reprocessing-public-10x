@@ -1,0 +1,47 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema",
+    "$id": "https://raw.githubusercontent.com/./master/nextflow_schema.json",
+    "title": ". pipeline parameters",
+    "description": "",
+    "type": "object",
+    "definitions": {
+        "input_output_options": {
+            "title": "Input/output options",
+            "type": "object",
+            "fa_icon": "fas fa-terminal",
+            "description": "Define where the pipeline should find input data and save output data.",
+            "properties": {
+                "samplefile": {
+                    "type": "string",
+                    "default": null,
+                    "description": "he path to the sample file provided to the pipeline. This is a tab-separated file with one series per line. Each line should contain a series ID and optionally a second column containing a list of sample IDs within the series (if you do not want entire series). These sample IDs are comma-separated but the series ID and list of sample IDs are tab-separated."
+                },
+                "sangerID": {
+                    "type": "string",
+                    "default": null,
+                    "description": "Your Sanger ID i.e user99 (NOT your email)."
+                },
+                "run_starsolo": {
+                    "type": "string",
+                    "default": "false",
+                    "description": "Boolean variable (true or false) to tell the pipeline whether to run STARsolo on the downloaded fastqs. Default false."
+                },
+                "keep_bams": {
+                    "type": "string",
+                    "default": "false",
+                    "description": "Boolean variable (true or false) to tell the pipeline whether to generate BAM files from STARsolo. Default false."
+                },
+                "sort_bam_mem": {
+                    "type": "integer",
+                    "default": 60000000000,
+                    "description": "The amount of RAM (in BYTES) to use when sorting the BAM file generated from STARsolo. Default is equivalent to 60.GB."
+                }
+            }
+        }
+    },
+    "allOf": [
+        {
+            "$ref": "#/definitions/input_output_options"
+        }
+    ]
+}

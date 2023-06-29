@@ -19,9 +19,32 @@ def errorMessage() {
     exit 1
 }
 
+process email_startup {
+  
+  shell:
+  '''
+  contents=`cat !{params.SAMPLEFILE}`
+  sendmail "!{params.sangerID}@sanger.ac.uk" <<EOF
+  Subject: Launched pipeline
+  From: noreply-cellgeni-pipeline@sanger.ac.uk
+  Hi there, you've launched Cellular Genetics Informatics' Reprocessing pipeline.
+  Your parameters are:
+  Samplefile: !{params.SAMPLEFILE}
+  Run STARsolo: !{params.run_starsolo}
+  Keep BAMs: !{params.keep_bams}
+  Sorting BAM memory (in bytes): !{params.sort_bam_mem}
+  
+  Your sample file looks like:
+  $contents
+  Thanks,
+  Cellular Genetics Informatics
+  EOF
+  '''
+}
+
 process step1 {
  
-  publishDir "${params.outdir}/metadata", mode: "copy"
+  publishDir "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/!{params.sangerID}/!{params.timestamp}/reprocessing-results/metadata", mode: "copy"
 
   input:
   val(sample)
@@ -195,7 +218,7 @@ process step3 {
 
 process step4 {
 
-  publishDir "${params.outdir}", mode: "copy"
+  publishDir "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/!{params.sangerID}/!{params.timestamp}/reprocessing-results", mode: "copy"
 
   input:
   path(sample_list)
@@ -205,6 +228,7 @@ process step4 {
 
 
   output:
+  env(SERIES), emit: id //This is only done to ensure email finish happens after workflow completes
   tuple env(SERIES), path("fastqs/*/*"), emit: org_fq
   
   shell:
@@ -279,7 +303,7 @@ process step6 {
   path(qc_files)
 
   output:
-  path('starsolo_results/*')
+  path('starsolo_results/*'), emit: results
 
   shell:
   '''
@@ -292,17 +316,46 @@ process step6 {
   '''
 }
 
+process email_finish {
+
+  input:
+  val(id)
+
+  shell:
+  '''
+  sendmail "!{params.sangerID}@sanger.ac.uk" <<EOF
+  Subject: Finished pipeline
+  From: noreply-cellgeni-pipeline@sanger.ac.uk
+  Hi there, your run of Cellular Genetics Informatics' reprocessing pipeline is complete.
+  Results are available here: "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/!{params.sangerID}/!{params.timestamp}/reprocessing-results"
+  The results will be deleted in a week so please copy your data to a sensible location, i.e.:
+  cp -r "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/!{params.sangerID}/!{params.timestamp}/reprocessing-results" /path/to/sensible/location
+  Thanks,
+  Cellular Genetics Informatics
+  EOF
+  '''
+}
+
+workflow pipeline {
+    main:
+  	ch_sample_list = params.samplefile != null ? Channel.fromPath(params.samplefile) : errorMessage()
+  	ch_sample_list | flatMap{ it.readLines() } | step1 
+  	//parallelised downloading urls, ensure all downloads are complete before moving on, ensures all fastqs are generated before running step4 and step5
+  	//TO DO: change pipeline so STARsolo runs when each run's fastqs are available, not all the fastqs
+  	//below step groups fastqs series id, then creates tuple of series id and all fastqs which are passed to step4
+  	step1.out.series_samples_urls_tsv | splitText | step2 | step3 | groupTuple | map ({ it -> [it.first(), it.tail().flatten()] }) | set { ch4 }
+  	step4(step1.out.series_sample_list, step1.out.series_run_list, step1.out.series_sample_run_tsv, ch4)
+  	//below adds the series_samples_urls_tsv and series_sample_run_tsv to each set of fastqs before transposing so each tuple is its own channel
+  	step4.out.org_fq | join( step1.out.series_metadata ) | transpose | step5
+  	step5.out.ss | collect | set { step5_ss }
+  	step5.out.qc | collect | set { step5_qc }
+  	step6(step5_ss, step5_qc) | flatten |  subscribe { it -> itname = it.getName(); it.copyTo("/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/${params.sangerID}/${params.timestamp}/reprocessing-results/starsolo/${itname}") }
+    emit:
+	step4.out.id	
+}
+
 workflow {
-  ch_sample_list = params.samplefile != null ? Channel.fromPath(params.samplefile) : errorMessage()
-  ch_sample_list | flatMap{ it.readLines() } | step1 
-  //parallelised downloading urls, ensure all downloads are complete before moving on, ensures all fastqs are generated before running step4 and step5
-  //TO DO: change pipeline so STARsolo runs when each run's fastqs are available, not all the fastqs
-  //below step groups fastqs series id, then creates tuple of series id and all fastqs which are passed to step4
-  step1.out.series_samples_urls_tsv | splitText | step2 | step3 | groupTuple | map ({ it -> [it.first(), it.tail().flatten()] }) | set { ch4 }
-  step4(step1.out.series_sample_list, step1.out.series_run_list, step1.out.series_sample_run_tsv, ch4)
-  //below adds the series_samples_urls_tsv and series_sample_run_tsv to each set of fastqs before transposing so each tuple is its own channel
-  step4.out.org_fq | join( step1.out.series_metadata ) | transpose | step5
-  step5.out.ss | collect | set { step5_ss }
-  step5.out.qc | collect | set { step5_qc }
-  step6(step5_ss, step5_qc) | flatten |  subscribe { it -> itname = it.getName(); it.copyTo("${params.outdir}/starsolo_results/${itname}") } 
+    main:
+    	email_startup()
+	pipeline | email_finish
 }
