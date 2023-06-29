@@ -347,9 +347,6 @@ workflow {
   step1.out.series_samples_urls_tsv | splitText | step2 | step3 | groupTuple | map ({ it -> [it.first(), it.tail().flatten()] }) | set { ch4 }
   step4(step1.out.series_sample_list, step1.out.series_run_list, step1.out.series_sample_run_tsv, ch4)
   //below adds the series_samples_urls_tsv and series_sample_run_tsv to each set of fastqs before transposing so each tuple is its own channel
-  if (params.run_starsolo == false) {
-    email_finish(step4.out.id)
-  }
   step4.out.org_fq | join( step1.out.series_metadata ) | transpose | step5
   step5.out.ss | collect | set { step5_ss }
   step5.out.qc | collect | set { step5_qc }
