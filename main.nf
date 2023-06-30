@@ -228,7 +228,6 @@ process step4 {
 
 
   output:
-  env(SERIES), emit: id //This is only done to ensure email finish happens after workflow completes
   tuple env(SERIES), path("fastqs/*/*"), emit: org_fq
   
   shell:
@@ -303,8 +302,7 @@ process step6 {
   path(qc_files)
 
   output:
-  path('starsolo_results/qc.tsv'), emit: qc //This is only done to ensure email finish happens after workflow completes
-  path('starsolo_results/*'), emit: results
+  path('starsolo_results/*')
 
   shell:
   '''
@@ -314,26 +312,6 @@ process step6 {
   mkdir starsolo_results
   mv *_starsolo starsolo_results
   mv qc.tsv starsolo_results
-  '''
-}
-
-process email_finish {
-
-  input:
-  val(id)
-
-  shell:
-  '''
-  sendmail "!{params.sangerID}@sanger.ac.uk" <<EOF
-  Subject: Finished pipeline
-  From: noreply-cellgeni-pipeline@sanger.ac.uk
-  Hi there, your run of Cellular Genetics Informatics' reprocessing pipeline is complete.
-  Results are available here: "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/!{params.sangerID}/!{params.timestamp}/reprocessing-results"
-  The results will be deleted in a week so please copy your data to a sensible location, i.e.:
-  cp -r "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/!{params.sangerID}/!{params.timestamp}/reprocessing-results" /path/to/sensible/location
-  Thanks,
-  Cellular Genetics Informatics
-  EOF
   '''
 }
 
@@ -350,8 +328,20 @@ workflow {
   step4.out.org_fq | join( step1.out.series_metadata ) | transpose | step5
   step5.out.ss | collect | set { step5_ss }
   step5.out.qc | collect | set { step5_qc }
-  step6(step5_ss, step5_qc) 
-  step6.out.results | flatten |  subscribe { it -> itname = it.getName(); it.copyTo("/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/${params.sangerID}/${params.timestamp}/reprocessing-results/starsolo/${itname}") }
-  //Ternary operator to ensure finishing email is sent after final process depending on whether starsolo is ran or not
-  params.run_starsolo == true ? email_finish(step6.out.qc) : email_finish(step4.out.id) 
+  step6(step5_ss, step5_qc) | flatten |  subscribe { it -> itname = it.getName(); it.copyTo("/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/${params.sangerID}/${params.timestamp}/reprocessing-results/starsolo/${itname}") }
+}
+
+workflow.onComplete {
+  
+  def msg = """\
+      Hi there, your run of Cellular Genetics Informatics' reprocessing pipeline is complete.
+      Results are available here: "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/${params.sangerID}/${params.timestamp}/reprocessing-results"
+      The results will be deleted in a week so please copy your data to a sensible location, i.e.:
+      cp -r "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/${params.sangerID}/${params.timestamp}/reprocessing-results" /path/to/sensible/location
+      Thanks,
+      Cellular Genetics Informatics
+      """
+      .stripIndent()
+  
+  sendMail (to: "${params.sangerID}@sanger.ac.uk", from: 'noreply-cellgeni-pipeline@sanger.ac.uk', subject: 'Finished pipeline', body: msg)
 }
