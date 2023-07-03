@@ -14,7 +14,7 @@
                 "samplefile": {
                     "type": "string",
                     "default": null,
-                    "description": "he path to the sample file provided to the pipeline. This is a tab-separated file with one series per line. Each line should contain a series ID and optionally a second column containing a list of sample IDs within the series (if you do not want entire series). These sample IDs are comma-separated but the series ID and list of sample IDs are tab-separated."
+                    "description": "The path to the sample file provided to the pipeline. This is a tab-separated file with one series per line. Each line should contain a series ID and optionally a second column containing a list of sample IDs within the series (if you do not want entire series). These sample IDs are comma-separated but the series ID and list of sample IDs are tab-separated. Examples are available here: https://github.com/cellgeni/nf-reprocessing-public-10x/tree/nextflow-tower/examples"
                 },
                 "sangerID": {
                     "type": "string",
