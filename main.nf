@@ -44,7 +44,7 @@ process email_startup {
 
 process step1 {
  
-  publishDir "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/!{params.sangerID}/!{params.timestamp}/reprocessing-results/metadata", mode: "copy"
+  publishDir "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/${params.sangerID}/${params.timestamp}/reprocessing-results/metadata", mode: "copy"
 
   input:
   val(sample)
@@ -218,7 +218,7 @@ process step3 {
 
 process step4 {
 
-  publishDir "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/!{params.sangerID}/!{params.timestamp}/reprocessing-results", mode: "copy"
+  publishDir "/lustre/scratch127/cellgen/cellgeni/tickets/nextflow-tower-results/${params.sangerID}/${params.timestamp}/reprocessing-results", mode: "copy"
 
   input:
   path(sample_list)
