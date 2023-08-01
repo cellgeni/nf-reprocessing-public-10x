@@ -27,13 +27,11 @@ process step1 {
   val(sample)
  
   output:
-  //Want to copy all metadata to output but need specific files for later processes
+  //Want to copy all metadata to output but need specific files for later processes (wanna fix!!!)
   path("*")
-  tuple env(SERIES), path("*/*.sample_x_run.tsv"), path("*/*.parsed.tsv"), emit: series_metadata
   path("*/*.parsed.tsv"), emit: series_samples_urls_tsv
-  path("*/*.sample.list"), emit: series_sample_list
-  path("*/*.run.list"), emit: series_run_list
-  path("*/*.sample_x_run.tsv"), emit: series_sample_run_tsv
+  tuple env(SERIES), path("*/*.sample.list"), path("*/*.run.list"), path("*/*.sample_x_run.tsv"), emit: step4_input_files
+  tuple env(SERIES), path("*/*.sample_x_run.tsv"), path("*/*.parsed.tsv"), emit: series_metadata
 
   shell:
   '''
@@ -90,7 +88,7 @@ process step1 {
 process step2 {
 
   input:
-  env(metadata)
+  tuple env(SERIES), env(SAMPLE), env(URL_INPUT), env(FILETYPE)
 
   output:
   env(SERIES)
@@ -99,10 +97,6 @@ process step2 {
 
   shell:
   '''
-  SERIES=`echo ${metadata} | cut -f 1 -d " "`
-  SAMPLE=`echo ${metadata} | cut -f 2 -d " "`
-  URL_INPUT=`echo ${metadata} | cut -f 5 -d " "`
-  FILETYPE=`echo ${metadata} | cut -f 6 -d " "`
   # download all the necessary raw files using 'transfer' queue on Farm. Did we tell you this whole thing is Sanger-specific?
   COUNT=1
 
@@ -198,11 +192,7 @@ process step4 {
   publishDir "${params.outdir}", mode: "copy"
 
   input:
-  path(sample_list)
-  path(run_list)
-  path(sample_run_list)
-  tuple env(SERIES), path(in_fqs)
-
+  tuple env(SERIES), path(in_fqs), path(sample_list), path(run_list), path(sample_run_list)
 
   output:
   tuple env(SERIES), path("fastqs/*/*"), emit: org_fq
@@ -231,9 +221,9 @@ process step4 {
     for j in $SMPRUNS
     do
       >&2 echo "==> Run $j belongs to sample $i, moving to directory $i.."
-      if [ ! "$(ls "${j}_*.fastq.gz" 2>/dev/null)" ]
+      if [ ! "$(ls "${j}*.fastq.gz" 2>/dev/null)" ]
       then
-        mv ${j}_*.fastq.gz $i
+        mv ${j}*.fastq.gz $i
       fi
     done
     mv $i "fastqs/${SERIES}"
@@ -298,11 +288,13 @@ workflow {
   //parallelised downloading urls, ensure all downloads are complete before moving on, ensures all fastqs are generated before running step4 and step5
   //TO DO: change pipeline so STARsolo runs when each run's fastqs are available, not all the fastqs
   //below step groups fastqs series id, then creates tuple of series id and all fastqs which are passed to step4
-  step1.out.series_samples_urls_tsv | splitText | step2 | step3 | groupTuple | map ({ it -> [it.first(), it.tail().flatten()] }) | set { ch4 }
-  step4(step1.out.series_sample_list, step1.out.series_run_list, step1.out.series_sample_run_tsv, ch4)
+  //have to flatten first and then map to treat each input to map as a string rather than array (work on this!!!)
+  step1.out.series_samples_urls_tsv | map { it -> it.readLines() } | flatten | map { it -> [it.split("\\t")[0], it.split("\\t")[1], it.split("\\t")[3], it.split("\\t")[4]] } | step2 | step3 | groupTuple | map { it -> [it.first(), it.tail().flatten()] } | set { ch_fq }
+  ch_fq.join(step1.out.step4_input_files) | set { ch_step4_input }
+  step4(ch_step4_input)
   //below adds the series_samples_urls_tsv and series_sample_run_tsv to each set of fastqs before transposing so each tuple is its own channel
   step4.out.org_fq | join( step1.out.series_metadata ) | transpose | step5
   step5.out.ss | collect | set { step5_ss }
   step5.out.qc | collect | set { step5_qc }
-  step6(step5_ss, step5_qc) | flatten |  subscribe { it -> itname = it.getName(); it.copyTo("${params.outdir}/starsolo_results/${itname}") } 
+  step6(step5_ss, step5_qc) | flatten |  subscribe { it -> itname = it.getName(); it.copyTo("${params.outdir}/starsolo_results/${itname}") }
 }
