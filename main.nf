@@ -137,7 +137,7 @@ process step2 {
 
     if [ "${FILETYPE}" == "BAM" ]; then
       mv done_wget/*.bam* "done_wget/${SAMPLE}.bam"
-    elif [ "${FILETYPE}" == "GZ1" ] || [ [ "${FILETYPE}" == "GZ2" ]; then
+    elif [ "${FILETYPE}" == "GZ1" ] || [ "${FILETYPE}" == "GZ2" ]; then
       echo "need to do move fastqs to correct extension too but need to see how fastqs are passed to metadata"
       echo "that could change how this process works for fastqs"
     fi
