@@ -1,5 +1,5 @@
 # nf-reprocessing-public-10x
-Nextflow pipeline of Alex's reprocessing [repo](https://github.com/cellgeni/reprocess_public_10x).
+Nextflow pipeline of our reprocessing [pipeline](https://github.com/cellgeni/reprocess_public_10x).
 
 ## Contents of Repo:
 * `main.nf` - the Nextflow pipeline that executes reprocessing.
