@@ -201,7 +201,7 @@ else
 fi 
 
 ## if we only want a fraction of samples, make sure we subset all the relevant files
-if [[ $SUBSET != "" ]]
+if [[ $SUBSET != null ]]
 then
   >&2 echo "Narrowing down the dataset using the file $SUBSET"
   >&2 echo "New list of the samples to be processed:"
