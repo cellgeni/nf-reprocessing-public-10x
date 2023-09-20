@@ -24,41 +24,35 @@ process step1 {
   publishDir "${params.outdir}/metadata", mode: "copy"
 
   input:
-  val(sample)
+  tuple val(SERIES), val(SUBSET)
  
   output:
   //Want to copy all metadata to output but need specific files for later processes (wanna fix!!!)
   path("*")
   path("*/*.parsed.tsv"), emit: series_samples_urls_tsv
-  tuple env(SERIES), path("*/*.sample.list"), path("*/*.run.list"), path("*/*.sample_x_run.tsv"), emit: step4_input_files
-  tuple env(SERIES), path("*/*.sample_x_run.tsv"), path("*/*.parsed.tsv"), emit: series_metadata
+  tuple val(SERIES), path("*/*.sample.list"), path("*/*.run.list"), path("*/*.sample_x_run.tsv"), emit: step4_input_files
+  tuple val(SERIES), path("*/*.sample_x_run.tsv"), path("*/*.parsed.tsv"), emit: series_metadata
 
   shell:
   '''
-  SERIES=`echo !{sample} | cut -f 1 -d " "`
-  SUBSET=`echo !{sample} | cut -f 2 -d " "`
-
   ### Step 1: set everything up, collect metadata using ffq/curl from ENA, parse the outputs using custom scripts
-  if [[ -d "${SERIES}" ]]; then
-    >&2 echo "ERROR: Cannot create directory ${SERIES} because it already exists!"
+  if [[ -d "!{SERIES}" ]]; then
+    >&2 echo "ERROR: Cannot create directory !{SERIES} because it already exists!"
     exit
   else
-    mkdir ${SERIES}
+    mkdir !{SERIES}
   fi
 
-  cd ${SERIES}
+  cd !{SERIES}
  
-  #If there is not sample list path present in samplefile then both variables are set to series ID, this is fixed below
-  if [[ "${SERIES}" == "${SUBSET}" ]]; then
-    SUBSET=""
-  else
-    echo $SUBSET | tr "," "\n" > subset.txt
+  if [[ "!{SUBSET}" != null ]]; then
+    echo !{SUBSET} | tr "," "\n" > subset.txt
   fi
 
-  if [[ "${SUBSET}" != "" ]]; then
-    >&2 echo "WARNING: Using ${SUBSET} to only process select samples!"
+  if [[ "!{SUBSET}" != null ]]; then
+    >&2 echo "WARNING: Using !{SUBSET} to only process select samples!"
     if [[ `grep "^GSM" subset.txt` == "" && `grep "^SRS" subset.txt` == "" && `grep "^ERS" subset.txt` == "" ]]; then
-      >&2 echo "ERROR: The subset file ${SUBSET} can only contain GSM, SRS, or ERS IDs!"
+      >&2 echo "ERROR: The subset file !{SUBSET} can only contain GSM, SRS, or ERS IDs!"
       exit 1
     fi
   fi
@@ -66,14 +60,14 @@ process step1 {
   cp !{projectDir}/bin/curl_ena_metadata.sh .
   
   if [[ -f subset.txt ]]; then
-    !{projectDir}/bin/collect_metadata.sh ${SERIES} subset.txt
+    !{projectDir}/bin/collect_metadata.sh !{SERIES} subset.txt
   else
-    !{projectDir}/bin/collect_metadata.sh ${SERIES} ${SUBSET}
+    !{projectDir}/bin/collect_metadata.sh !{SERIES} !{SUBSET}
   fi
   ## finally, classify each run into 3 major types:
   ## 1) we have useable 10x paired-end files; 2) we need to get them from 10x BAM; 3) we need to get them from SRA
   ## simultaneously, '$SERIES.urls.list' is generated listing all things that need to be downloaded
-  !{projectDir}/bin/parse_ena_metadata.sh $SERIES | sed "s/^/${SERIES}\t/g" > $SERIES.parsed.tsv
+  !{projectDir}/bin/parse_ena_metadata.sh !{SERIES} | sed "s/^/!{SERIES}\t/g" > !{SERIES}.parsed.tsv
   
   ## do not want curl_ena_mtadata.sh script in output so once used, remove it
   rm curl_ena_metadata.sh
@@ -284,7 +278,8 @@ process step6 {
 
 workflow {
   ch_sample_list = params.samplefile != null ? Channel.fromPath(params.samplefile) : errorMessage()
-  ch_sample_list | flatMap{ it.readLines() } | step1 
+	//Create tuple of series id followed by subset of sample ids, this will produce a cardinality warning if one sample has subset and other doesnt
+  ch_sample_list | flatMap{ it.readLines() } | map { it -> if (it.split().size() == 1) { [ it.split()[0] ] } else if (it.split().size() == 2) { [ it.split()[0], it.split()[1] ] } } | step1 
   //parallelised downloading urls, ensure all downloads are complete before moving on, ensures all fastqs are generated before running step4 and step5
   //TO DO: change pipeline so STARsolo runs when each run's fastqs are available, not all the fastqs
   //below step groups fastqs series id, then creates tuple of series id and all fastqs which are passed to step4
