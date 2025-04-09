@@ -1,0 +1,15 @@
+#!/bin/bash
+
+set -euo pipefail
+
+samplefile="actions/samples.txt"
+
+[[ -e "$samplefile" ]] || (echo "File "$samplefile" not found" && false)
+
+nextflow run -r 23-263 cellgeni/nf-reprocessing-public-10x \
+  --samplefile $samplefile \
+        --run_starsolo false \
+        --keep_bams false \
+        --sort_bam_mem 60000000000 \
+  --ansi-log false \
+  -resume
