@@ -13,6 +13,8 @@ def helpMessage() {
             --datasets   Path to a .tsv file containing dataset information (e.g., datasets.tsv).
                          First column should be 'dataset_id' and second column should be a list 
                          of comma separated sample IDs.
+            --mapper     Specify the mapper to use (e.g., 'starsolo' or 'cellranger').
+            --help       Show this help message and exit.
 
     Examples:
         nextflow run main.nf --datasets examples/datasets.tsv
