@@ -4,7 +4,8 @@ include { SAMTOOLS_INDEX     } from '../../../modules/nf-core/samtools/index/mai
 workflow REPROCESS10X {
 
     take:
-    datasets // channel: [ val(meta), [ sample_ids ] ]
+    datasets  // channel: [ val(meta), [ sample_ids ] ]
+    mapper    // channel: [ mapper ] either starsolo or cellranger
 
     main:
     
@@ -16,10 +17,10 @@ workflow REPROCESS10X {
                                           .map { row -> 
                                               [
                                                 [
-                                                  id: row[1],
+                                                  id       : row[1],
                                                   sample_id: row[0],
-                                                  specie: row[2],
-                                                  type: row[4]
+                                                  specie   : row[2],
+                                                  type     : row[4]
                                                 ],
                                                 row[3]
                                             ]
@@ -38,28 +39,23 @@ workflow REPROCESS10X {
                                                   REPROCESS10X_BAM2FASTQ.out.fastq,
                                                   REPROCESS10X_SRA2FASTQ.out.fastq
                                            )
-    
+    // Rename fastq files according to Cell Ranger format
+    REPROCESS10X_RENAMEFASTQ(fastq_files)
+
     // Group fastq files by sample
-    sample_fastqs = fastq_files.map { meta, fastq ->
-        [
-            meta.sample_id,
-            meta,
-            fastq
-        ]
-    }
+    sample_fastqs = REPROCESS10X_RENAMEFASTQ.fastq.map { run_meta, fastq -> 
+                                        [
+                                            id: run_meta.sample_id,
+                                            specie: run_meta.specie,
+                                        ]
 
-    
-                        
+    // Run Star solo
+    REPROCESS10X_STARSOLO(REPROCESS10X_RENAMEFASTQ.fastq)
 
-
-
-    
 
     emit:
-    // TODO nf-core: edit emitted channels
-    bam      = SAMTOOLS_SORT.out.bam           // channel: [ val(meta), [ bam ] ]
-    bai      = SAMTOOLS_INDEX.out.bai          // channel: [ val(meta), [ bai ] ]
-    csi      = SAMTOOLS_INDEX.out.csi          // channel: [ val(meta), [ csi ] ]
-
-    versions = ch_versions                     // channel: [ versions.yml ]
+    fastq    = sample_fastqs                      // channel: [ val(meta), [ bam ] ]
+    tsv      = REPROCESS10X_LOADMETADATA.out.tsv  // channel: [ val(meta), [ tsv ] ]
+    qc       = REPROCESS10X_STARSOLO.out.qc       // channel: [ val(meta), [ qc ] ]
+    versions = ch_versions                        // channel: [ versions.yml ]
 }
