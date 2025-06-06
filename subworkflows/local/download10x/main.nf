@@ -1,4 +1,5 @@
 include { REPROCESS10X_PARSEMETADATA } from '../../../modules/local/reprocess10x/parsemetadata'
+include { REPROCESS10X_LOADDATA } from '../../../modules/local/reprocess10x/loaddata'
 
 workflow DOWNLOAD10X {
 
@@ -9,7 +10,6 @@ workflow DOWNLOAD10X {
     main:
     
     REPROCESS10X_PARSEMETADATA(datasets)
-    REPROCESS10X_PARSEMETADATA.out.links.view()
 
     // Get links from metadata
     links = REPROCESS10X_PARSEMETADATA.out.links
@@ -26,11 +26,15 @@ workflow DOWNLOAD10X {
                                                 row[2].split(";")
                                             ]
                                           }
+
       
-      links.view()
-    
+    links.view()
     // Load data from links
-    // REPROCESS10X_LOADDATA(links)
+    REPROCESS10X_LOADDATA(links)
+
+    REPROCESS10X_LOADDATA.out.urls.view()
+    REPROCESS10X_LOADDATA.out.fastq.view()
+    REPROCESS10X_LOADDATA.out.sra.view()
 
     // // Convert data if needed
     // REPROCESS10X_BAM2FASTQ(REPROCESS10X_LOADDATA.out.bam)
