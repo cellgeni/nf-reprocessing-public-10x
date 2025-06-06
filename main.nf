@@ -1,5 +1,5 @@
 // IMPORT SUBWORKFLOW
-include { REPROCESS10X } from './subworkflows/local/reprocess10x/'
+include { DOWNLOAD10X } from './subworkflows/local/download10x/'
 
 // HELP MESSAGE
 def helpMessage() {
@@ -43,5 +43,8 @@ workflow {
             ]
         }
     
-    datasets.view()
+    DOWNLOAD10X(
+        datasets,
+        params.wl_basedir
+    )
 }

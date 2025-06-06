@@ -1,5 +1,4 @@
-include { SAMTOOLS_SORT      } from '../../../modules/nf-core/samtools/sort/main'
-include { SAMTOOLS_INDEX     } from '../../../modules/nf-core/samtools/index/main'
+include { REPROCESS10X_PARSEMETADATA } from '../../../modules/local/reprocess10x/parsemetadata'
 
 workflow DOWNLOAD10X {
 
@@ -9,21 +8,22 @@ workflow DOWNLOAD10X {
     
     main:
     
-    REPROCESS10X_LOADMETADATA(datasets)
-    REPROCESS10X_LOADMETADATA.out.links.view()
+    REPROCESS10X_PARSEMETADATA(datasets)
+    REPROCESS10X_PARSEMETADATA.out.links.view()
 
     // Get links from metadata
-    links = REPROCESS10X_LOADMETADATA.out.links
+    links = REPROCESS10X_PARSEMETADATA.out.links
                                           .splitCsv(sep: '\t', strip: true)
-                                          .map { row -> 
+                                          .map { meta, row -> 
                                               [
                                                 [
-                                                  id       : row[1],
-                                                  sample_id: row[0],
-                                                  specie   : row[2],
-                                                  type     : row[4]
+                                                  id       : row[0],
+                                                  sample_id: row[4],
+                                                  dataset_id : meta.id,
+                                                  specie   : row[1],
+                                                  type     : row[3]
                                                 ],
-                                                row[3]
+                                                row[2].split(";")
                                             ]
                                           }
       
