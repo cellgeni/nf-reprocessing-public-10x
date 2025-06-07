@@ -41,7 +41,7 @@ process REPROCESS10X_SRA2FASTQ {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         cellgeni/reprocess_public_10x: \$reprocess_version
-        bamtofastq: \$bamtofastq_version
+        seqtk_version: \$seqtk_version
         parallel-fastq-dump: \$fqdump_version
     END_VERSIONS
     """
