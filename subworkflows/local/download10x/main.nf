@@ -1,5 +1,7 @@
 include { REPROCESS10X_PARSEMETADATA } from '../../../modules/local/reprocess10x/parsemetadata'
 include { REPROCESS10X_LOADDATA } from '../../../modules/local/reprocess10x/loaddata'
+include { REPROCESS10X_BAM2FASTQ } from '../../../modules/local/reprocess10x/bam2fastq'
+include { REPROCESS10X_SRA2FASTQ } from '../../../modules/local/reprocess10x/sra2fastq'
 
 workflow DOWNLOAD10X {
 
@@ -37,8 +39,8 @@ workflow DOWNLOAD10X {
     REPROCESS10X_LOADDATA.out.sra.view()
 
     // // Convert data if needed
-    // REPROCESS10X_BAM2FASTQ(REPROCESS10X_LOADDATA.out.bam)
-    // REPROCESS10X_SRA2FASTQ(REPROCESS10X_BAM2FASTQ.out.sra)
+    REPROCESS10X_BAM2FASTQ(REPROCESS10X_LOADDATA.out.bam)
+    REPROCESS10X_SRA2FASTQ(REPROCESS10X_LOADDATA.out.sra, wl_basedir)
 
     // // Combine all fastq files
     // fastq_files = REPROCESS10X_LOADDATA.out.fastq
