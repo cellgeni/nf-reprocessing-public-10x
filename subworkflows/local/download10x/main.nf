@@ -42,26 +42,27 @@ workflow DOWNLOAD10X {
     REPROCESS10X_BAM2FASTQ(REPROCESS10X_LOADDATA.out.bam)
     REPROCESS10X_SRA2FASTQ(REPROCESS10X_LOADDATA.out.sra, wl_basedir)
 
-    // // Combine all fastq files
-    // fastq_files = REPROCESS10X_LOADDATA.out.fastq
-    //                                        .concat(
-    //                                               REPROCESS10X_BAM2FASTQ.out.fastq,
-    //                                               REPROCESS10X_SRA2FASTQ.out.fastq
-    //                                        )
+    // // Combine all fastq channels and group by sample
+    fastq_files = REPROCESS10X_LOADDATA.out.fastq
+                                           .concat(
+                                                  REPROCESS10X_BAM2FASTQ.out.fastq,
+                                                  REPROCESS10X_SRA2FASTQ.out.fastq
+                                           ).map { run_meta, fastq ->
+                                               [
+                                                  [
+                                                    id       : run_meta.sample_id,
+                                                    dataset_id : run_meta.dataset_id,
+                                                  ],
+                                                  fastq
+                                               ]
+                                           }.groupTuple(by: 0)
+    fastq_files.view()
     // // Rename fastq files according to Cell Ranger format
     // REPROCESS10X_RENAMEFASTQ(fastq_files)
 
-    // // Group fastq files by sample
-    // sample_fastqs = REPROCESS10X_RENAMEFASTQ.fastq.map { run_meta, fastq -> 
-    //                                     [
-    //                                         id: run_meta.sample_id,
-    //                                         specie: run_meta.specie,
-    //                                     ]
-    // }
-
 
     // emit:
-    // fastq    = sample_fastqs                      // channel: [ val(meta), [ bam ] ]
+    // fastq    = REPROCESS10X_RENAMEFASTQ.fastq     // channel: [ val(meta), [ bam ] ]
     // tsv      = REPROCESS10X_LOADMETADATA.out.tsv  // channel: [ val(meta), [ tsv ] ]
     // versions = ch_versions                        // channel: [ versions.yml ]
 }
