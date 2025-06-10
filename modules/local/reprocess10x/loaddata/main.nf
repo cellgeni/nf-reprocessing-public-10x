@@ -29,10 +29,11 @@ process REPROCESS10X_LOADDATA {
     cat ${meta.id}.urls.list | xargs -I {} -n1 -P4 wget --retry-connrefused --read-timeout=20 --timeout=15 --tries=0 $args {}
 
     # Rename downloaded files
-    if "${meta.type}" == "BAM"; then
+    shopt -s extglob
+    if [[ "${meta.type}" == "BAM" && ! -f "${prefix}.bam" ]]; then
         mv -T *.bam* "${prefix}.bam"
-    elif "${meta.type}" == "SRA"; then
-        mv -T SRR* "${prefix}"
+    elif [[ "${meta.type}" == "SRA" && ! -f "${prefix}" ]]; then
+        mv -T SRR!(*.urls.list) "${prefix}"
     fi
     """
 
