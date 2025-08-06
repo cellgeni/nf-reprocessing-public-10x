@@ -13,19 +13,19 @@ workflow DOWNLOAD10X {
     
     REPROCESS10X_PARSEMETADATA(datasets)
 
-    // Get links from metadata
+    // Get links for each run file from metadata
     links = REPROCESS10X_PARSEMETADATA.out.links
                                           .splitCsv(sep: '\t', strip: true)
                                           .map { meta, row -> 
                                               [
                                                 [
-                                                  id       : row[0],
-                                                  sample_id: row[4],
-                                                  dataset_id : meta.id,
-                                                  specie   : row[1],
-                                                  type     : row[3]
+                                                  id       : row[0], // run ID
+                                                  sample_id: row[4], // sample ID
+                                                  dataset_id : meta.id, // dataset's series ID
+                                                  specie   : row[1], // specie
+                                                  type     : row[3] // file type i.e. BAM, FASTQ, SRA ...
                                                 ],
-                                                row[2].split(";")
+                                                row[2].split(";") // split URLs by semicolon in case of multiple .fastq files
                                             ]
                                           }
 
@@ -37,6 +37,7 @@ workflow DOWNLOAD10X {
     REPROCESS10X_LOADDATA.out.urls.view()
     REPROCESS10X_LOADDATA.out.fastq.view()
     REPROCESS10X_LOADDATA.out.sra.view()
+    REPROCESS10X_LOADDATA.out.bam.view()
 
     // // Convert data if needed
     REPROCESS10X_BAM2FASTQ(REPROCESS10X_LOADDATA.out.bam)
@@ -44,18 +45,22 @@ workflow DOWNLOAD10X {
 
     // // Combine all fastq channels and group by sample
     fastq_files = REPROCESS10X_LOADDATA.out.fastq
-                                           .concat(
-                                                  REPROCESS10X_BAM2FASTQ.out.fastq,
-                                                  REPROCESS10X_SRA2FASTQ.out.fastq
-                                           ).map { run_meta, fastq ->
-                                               [
-                                                  [
-                                                    id       : run_meta.sample_id,
-                                                    dataset_id : run_meta.dataset_id,
-                                                  ],
-                                                  fastq
-                                               ]
-                                           }.groupTuple(by: 0)
+                          .mix(
+                                REPROCESS10X_BAM2FASTQ.out.fastq,
+                                REPROCESS10X_SRA2FASTQ.out.fastq
+                          )
+                          // Leave only sample id and dataset id in metadata
+                          .map { run_meta, fastq ->
+                              [
+                                [
+                                  id       : run_meta.sample_id,
+                                  dataset_id : run_meta.dataset_id,
+                                ],
+                                fastq
+                              ]
+                          }
+                          // Group by sample id and dataset id
+                          .groupTuple()
     fastq_files.view()
     // // Rename fastq files according to Cell Ranger format
     // REPROCESS10X_RENAMEFASTQ(fastq_files)
