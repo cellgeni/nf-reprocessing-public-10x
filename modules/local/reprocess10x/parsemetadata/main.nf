@@ -1,10 +1,6 @@
 process REPROCESS10X_PARSEMETADATA {
     tag "Parsing metadata for $meta.id"
-    publishDir "results/$meta.id/metadata", mode: 'copy'
-
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'docker://quay.io/cellgeni/reprocess_10x':
-        'quay.io/cellgeni/reprocess_10x' }"
+    container "${ workflow.containerEngine == 'singularity' ? 'docker://quay.io/cellgeni/reprocess_10x': 'quay.io/cellgeni/reprocess_10x' }"
 
     input:
     tuple val(meta), val(sample_ids)

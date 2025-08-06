@@ -1,7 +1,5 @@
 process REPROCESS10X_SRA2FASTQ {
     tag "Converting sra file to .fastq for $meta.id"
-    cpus 16
-    publishDir "results/$meta.dataset_id/raw/$meta.sample_id/", mode: 'copy'
 
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'docker://quay.io/cellgeni/reprocess_10x':
