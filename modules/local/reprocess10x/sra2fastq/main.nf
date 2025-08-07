@@ -18,12 +18,10 @@ process REPROCESS10X_SRA2FASTQ {
     source sra_to_10x_fastq_gz.sh
     sra2fastq ${meta.id} ${whitelists} ${task.cpus}
 
-    reprocess_version=\$(grep reprocess /versions.txt | cut -d ':' -f 2)
     seqtk_version=\$(grep seqtk /versions.txt | cut -d ':' -f 2)
     fqdump_version=\$(grep "fastq-dump" /versions.txt | cut -d ':' -f 2)
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        cellgeni/reprocess_public_10x: \$reprocess_version
         bamtofastq: \$bamtofastq_version
         parallel-fastq-dump: \$fqdump_version
     END_VERSIONS
@@ -33,12 +31,10 @@ process REPROCESS10X_SRA2FASTQ {
     """
     touch ${meta.id}.fastq.gz
 
-    reprocess_version=\$(grep reprocess /versions.txt | cut -d ':' -f 2)
     seqtk_version=\$(grep seqtk /versions.txt | cut -d ':' -f 2)
     fqdump_version=\$(grep "fastq-dump" /versions.txt | cut -d ':' -f 2)
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        cellgeni/reprocess_public_10x: \$reprocess_version
         seqtk_version: \$seqtk_version
         parallel-fastq-dump: \$fqdump_version
     END_VERSIONS

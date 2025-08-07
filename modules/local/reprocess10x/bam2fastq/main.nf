@@ -19,11 +19,9 @@ process REPROCESS10X_BAM2FASTQ {
     source bam_to_10x_fastq_gz.sh
     bam2fastq ${meta.id} ${task.cpus}
 
-    reprocess_version=\$(grep reprocess /versions.txt | cut -d ':' -f 2)
     bamtofastq_version=\$(grep bamtofastq /versions.txt | cut -d ':' -f 2)
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        cellgeni/reprocess_public_10x: \$reprocess_version
         bamtofastq: \$bamtofastq_version
     END_VERSIONS
     """
@@ -32,11 +30,9 @@ process REPROCESS10X_BAM2FASTQ {
     """
     touch ${meta.id}.fastq.gz
 
-    reprocess_version=\$(grep reprocess /versions.txt | cut -d ':' -f 2)
     bamtofastq_version=\$(grep bamtofastq /versions.txt | cut -d ':' -f 2)
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        cellgeni/reprocess_public_10x: \$reprocess_version
         bamtofastq: \$bamtofastq_version
     END_VERSIONS
     """
