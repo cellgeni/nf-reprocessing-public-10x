@@ -4,8 +4,8 @@ process REPROCESS10X_BAM2FASTQ {
     publishDir "results/$meta.dataset_id/raw/$meta.sample_id/", mode: 'copy'
 
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'docker://quay.io/cellgeni/reprocess_10x':
-        'quay.io/cellgeni/reprocess_10x' }"
+        'docker://quay.io/cellgeni/reprocess_10x:latest':
+        'quay.io/cellgeni/reprocess_10x:latest' }"
 
     input:
     tuple val(meta), path(bam)
