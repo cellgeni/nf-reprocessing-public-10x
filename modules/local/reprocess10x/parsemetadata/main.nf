@@ -1,6 +1,6 @@
 process REPROCESS10X_PARSEMETADATA {
     tag "Parsing metadata for $meta.id"
-    container "${ workflow.containerEngine == 'singularity' ? 'docker://quay.io/cellgeni/reprocess_10x': 'quay.io/cellgeni/reprocess_10x' }"
+    container "${ workflow.containerEngine == 'singularity' ? 'docker://quay.io/cellgeni/reprocess_10x:dev': 'quay.io/cellgeni/reprocess_10x:dev' }"
 
     input:
     tuple val(meta), val(sample_ids)
