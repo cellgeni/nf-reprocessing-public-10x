@@ -2,28 +2,24 @@ process REPROCESS10X_LOADDATA {
     tag "Loading $prefix"
 
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'docker://quay.io/cellgeni/reprocess_10x':
-        'quay.io/cellgeni/reprocess_10x' }"
+        'docker://quay.io/cellgeni/reprocess_10x:latest':
+        'quay.io/cellgeni/reprocess_10x:latest' }"
 
     input:
-    tuple val(meta), val(links)
+    tuple val(meta), val(link)
 
     output:
-    tuple val(meta), path("${meta.id}.urls.list"), emit: urls
     tuple val(meta), path("$meta.id"),             emit: sra,   optional: true
     tuple val(meta), path("*.f*q*"),               emit: fastq, optional: true
     tuple val(meta), path("*.bam"),                emit: bam,   optional: true
+    path "versions.yml"           , emit: versions
 
     script:
     def args = task.ext.args ?: ''
-    def linkstring = links.join("\n")
     prefix = "${meta.id}"
     """
-    # Create a file with links to download
-    echo -e "$linkstring" > ${meta.id}.urls.list
-
-    # Download data
-    cat ${meta.id}.urls.list | xargs -I {} -n1 -P4 wget $args {}
+    # Download file
+    wget $args $link
 
     # Rename downloaded files
     shopt -s extglob
@@ -32,6 +28,12 @@ process REPROCESS10X_LOADDATA {
     elif [[ "${meta.type}" == "SRA" && ! -f "${prefix}" ]]; then
         mv -T SRR!(*.urls.list) "${prefix}"
     fi
+
+    # save versions
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        wget: \$(wget --version | head -n1 | awk '{ print \$3 }')
+    END_VERSIONS
     """
 
     stub:
@@ -42,5 +44,11 @@ process REPROCESS10X_LOADDATA {
     touch ${prefix}_1.fastq.gz
     touch ${prefix}_2.fastq.gz
     touch ${prefix}
+
+    # save versions
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        wget: \$(wget --version | head -n1 | awk '{ print \$3 }')
+    END_VERSIONS
     """
 }
