@@ -81,8 +81,8 @@ workflow DOWNLOAD10X {
     human_reference = channel.value(file( params.human_reference ))
     mouse_reference = channel.value(file( params.mouse_reference ))
 
-    REPROCESS10X_STARSOLO_HUMAN(fastq_files.human, human_reference)
-    REPROCESS10X_STARSOLO_MOUSE(fastq_files.mouse, mouse_reference)
+    REPROCESS10X_STARSOLO_HUMAN(fastq_files.human, human_reference, wl_basedir)
+    REPROCESS10X_STARSOLO_MOUSE(fastq_files.mouse, mouse_reference, wl_basedir)
 
     // Warn user if there are unexpected species detected
     fastq_files.other.count().subscribe { count ->
