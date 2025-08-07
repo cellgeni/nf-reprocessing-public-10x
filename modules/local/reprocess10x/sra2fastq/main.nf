@@ -2,8 +2,8 @@ process REPROCESS10X_SRA2FASTQ {
     tag "Converting sra file to .fastq for $meta.id"
 
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'docker://quay.io/cellgeni/reprocess_10x':
-        'quay.io/cellgeni/reprocess_10x' }"
+        'docker://quay.io/cellgeni/reprocess_10x:latest':
+        'quay.io/cellgeni/reprocess_10x:latest' }"
 
     input:
     tuple val(meta), path(sra)
