@@ -22,7 +22,7 @@ process REPROCESS10X_SRA2FASTQ {
     fqdump_version=\$(grep "fastq-dump" /versions.txt | cut -d ':' -f 2)
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        bamtofastq: \$bamtofastq_version
+        seqtk_version: \$seqtk_version
         parallel-fastq-dump: \$fqdump_version
     END_VERSIONS
     """
