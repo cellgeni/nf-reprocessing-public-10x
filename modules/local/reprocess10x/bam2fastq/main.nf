@@ -21,7 +21,7 @@ process REPROCESS10X_BAM2FASTQ {
     bam2fastq ${meta.id} ${task.cpus}
 
     # Rename the FASTQ files
-    rename_fastqs.sh ${meta.id} ${meta.sample_id} fastqs
+    rename_fastqs.sh ${meta.sample_id} ${meta.id} fastqs
 
     bamtofastq_version=\$(grep bamtofastq /versions.txt | cut -d ':' -f 2)
     cat <<-END_VERSIONS > versions.yml
