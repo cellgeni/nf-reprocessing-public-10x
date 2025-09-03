@@ -67,6 +67,8 @@ workflow DOWNLOAD10X {
                           }
                           // Group by sample id and dataset id
                           .groupTuple()
+                          // Combine a list of fastq files
+                          .map { meta, fastqlists -> tuple( meta, fastqlists.flatten() )}
                           // Split into separate channels for each specie
                           .branch { meta, fastqs ->
                               human: meta.specie == 'Homo sapiens'
