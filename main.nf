@@ -1,5 +1,8 @@
 // IMPORT SUBWORKFLOW
 include { DOWNLOAD10X } from './subworkflows/local/download10x/'
+include { STARSOLO10X as STARSOLO10X_HUMAN } from './subworkflows/local/starsolo10x/'
+include { STARSOLO10X as STARSOLO10X_MOUSE } from './subworkflows/local/starsolo10x/'
+
 
 // HELP MESSAGE
 def helpMessage() {
@@ -31,20 +34,59 @@ workflow {
         helpMessage()
         System.exit(0)
     } 
-
+    // STEP 0: Validate input parameters
     // Convert dataset list to channels
     datasets = Channel
         .fromPath(params.datasets)
         .splitCsv(header: true, sep: '\t')
-        .map { row -> 
+        .map { row ->
+            def sample_list =  row.sample_id.split(',')
             [
-                [id: row.dataset_id],
-                row.sample_id.split(',')
+                [id: groupKey(row.dataset_id, sample_list.size())],
+                sample_list
             ]
         }
     
+    // STEP 1: Download datasets
     DOWNLOAD10X(
         datasets,
         params.wl_basedir
     )
+
+    // Group samples by specie
+    fastqs = DOWNLOAD10X.out.fastq
+        .branch { meta, _fastqs ->
+            human: meta.specie == 'Homo sapiens'
+            mouse: meta.specie == 'Mus musculus'
+            other: true
+        }
+    
+    // STEP2: Run STARsolo on fastq files for human and mouse samples
+    human_reference = channel.value(file( params.human_reference ))
+    mouse_reference = channel.value(file( params.mouse_reference ))
+
+    STARSOLO10X_HUMAN(fastqs.human, human_reference, params.wl_basedir)
+    STARSOLO10X_MOUSE(fastqs.mouse, mouse_reference, params.wl_basedir)
+
+    // Warn user if there are unexpected species detected
+    fastqs.other.count().subscribe { count ->
+        if (count > 0) {
+            log.warn "Detected ${count} fastq files from unexpected species"
+        }
+    }
+
+    // STEP 3: Collect outputs
+
+    // Collect versions
+    DOWNLOAD10X.out.versions
+        .mix(
+            STARSOLO10X_HUMAN.out.versions,
+            STARSOLO10X_MOUSE.out.versions
+        )
+        .splitText(by: 20)
+        .unique()
+        .collectFile(name: 'versions.yml', storeDir: params.output_dir, sort: true)
+        .subscribe { __ -> 
+                log.info("Versions saved to ${params.output_dir}/versions.yml")
+            }
 }
