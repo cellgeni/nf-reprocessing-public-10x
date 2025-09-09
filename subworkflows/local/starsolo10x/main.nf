@@ -14,11 +14,17 @@ workflow STARSOLO10X {
 
     // Group by dataset
     samples_by_dataset = REPROCESS10X_STARSOLO.out.mapping
-        .view { it -> "MAPPING: $it" }
-        .map { meta, sample_dir -> [ groupKey([id: meta.dataset_id.getGroupTarget()], meta.dataset_id.getGroupSize()), sample_dir ] }
-        .view { it -> "SAMPLES BY DATASET: $it" }
-        .groupTuple()
-        .view { it -> "SAMPLES BY DATASET GROUPED: $it" }
+        .view { meta, mapping_dir -> "SAMPLES: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], mapping_dir=$mapping_dir (${mapping_dir.getClass().simpleName})" }
+        // Create a dataset-level grouping key
+        .map { meta, sample_dir ->
+            def dataset_meta = [id: meta.dataset_id.getGroupTarget()]
+            def sample_count = meta.dataset_id.getGroupSize()
+            tuple( groupKey(dataset_meta, sample_count), sample_dir )
+        }
+        .view { meta, sample_dir -> "SAMPLES BY DATASET: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], sample_dir=$sample_dir (${sample_dir.getClass().simpleName})" }
+        // Group by dataset
+        .groupTuple(sort: 'hash')
+        .view { meta, samples -> "SAMPLES GROUPED BY DATASET: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], samples=$samples (${samples.getClass().simpleName})" }
     
     // Collect mapping QC stats
     REPROCESS10X_MAPPINGQC(samples_by_dataset)
