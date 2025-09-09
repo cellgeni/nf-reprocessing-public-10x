@@ -19,7 +19,7 @@ workflow DOWNLOAD10X {
         .splitCsv(sep: '\t', strip: true)
         // Group by sample to count number of runs per sample
         .map { meta, row -> tuple( row[4], [meta, row] ) }
-        .groupTuple()
+        .groupTuple(sort: 'hash')
         .map { _sample_id, metas_rows -> tuple( metas_rows.size(), metas_rows ) }
         .transpose()
         // Flatten the rows
@@ -27,64 +27,55 @@ workflow DOWNLOAD10X {
             def (meta, row) = meta_row
             def run_meta = [
                 id       : row[0], // run ID
-                sample_id: row[4], // sample ID
-                sample_run_counts: size, // number of runs for this sample
+                sample_id: groupKey(row[4], size), // sample ID
                 dataset_id : meta.id, // dataset's series ID
-                dataset_sample_count: meta.dataset_sample_count, // number of samples in this dataset
                 specie   : row[1], // specie
                 type     : row[3] // file type i.e. BAM, FASTQ, SRA ...
             ]
             def urls = row[2].split(";")
             return urls.collect { url -> [run_meta, url] }
         }
-        .view { it -> "LINKS: $it" }
+        //.view { meta, url -> "LINKS: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], url=$url (${url.getClass().simpleName})" }
                                           
 
       
     // STEP 2: Load data from links
     REPROCESS10X_LOADDATA(links)
 
-    REPROCESS10X_LOADDATA.out.fastq.view { it -> "FASTQ: $it" }
-    REPROCESS10X_LOADDATA.out.sra.view() { it -> "SRA: $it" }
-    REPROCESS10X_LOADDATA.out.bam.view() { it -> "BAM: $it" }
+    //REPROCESS10X_LOADDATA.out.fastq.view { meta, fastq -> "FASTQ: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastq=$fastq (${fastq.getClass().simpleName})" }
+    //REPROCESS10X_LOADDATA.out.sra.view { meta, sra -> "SRA: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], sra=$sra (${sra.getClass().simpleName})" }
+    //REPROCESS10X_LOADDATA.out.bam.view { meta, bam -> "BAM: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], bam=$bam (${bam.getClass().simpleName})" }
 
-    // STEP 3: Convert loaded data to fastq if needed
+    // // STEP 3: Convert loaded data to fastq if needed
     REPROCESS10X_BAM2FASTQ(REPROCESS10X_LOADDATA.out.bam)
     REPROCESS10X_SRA2FASTQ(REPROCESS10X_LOADDATA.out.sra, wl_basedir)
 
     // STEP 4: Collect all outputs
     // Combine all fastq channels and group by sample
-    fastq_files = REPROCESS10X_LOADDATA.out.fastq
+    fastqs = REPROCESS10X_LOADDATA.out.fastq
         // Combine fastq files for each run as they were loaded separately
-        .view { it -> "FASTQ LOADED: $it" }
-        .groupTuple(size: 2)
-        .view { it -> "FASTQ GROUPED: $it" }
+        //.view { meta, fastq -> "FASTQ LOADED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastq=$fastq (${fastq.getClass().simpleName})" }
+        .groupTuple(size: 2, sort: 'hash')
+        //.view { meta, fastqs -> "FASTQ GROUPED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Combine fastq files from BAM and SRA conversion
         .mix(
             REPROCESS10X_BAM2FASTQ.out.fastq,
             REPROCESS10X_SRA2FASTQ.out.fastq
         )
-        .view { it -> "FASTQ MIXED: $it" }
+        //.view { meta, fastqs -> "FASTQ MIXED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Leave only sample id and dataset id in metadata
         .map { run_meta, fastq ->
-            [
-                run_meta.sample_id,
-                [
-                    id       : run_meta.sample_id.getGroupTarget(),
-                    dataset_id : run_meta.dataset_id,
-                    specie: run_meta.specie,
-                    type: run_meta.type
-                ],
-                fastq
-            ]
+            def sample_meta = [id: run_meta.sample_id.getGroupTarget(), dataset_id: run_meta.dataset_id, specie: run_meta.specie]
+            def run_count = run_meta.sample_id.getGroupSize()
+            tuple( groupKey(sample_meta, run_count), fastq )
         }
-        .view { it -> "FASTQ PRE-GROUP: $it" }
+        //.view { groupkey, meta, fastqs -> "FASTQ PRE-GROUPED: groupkey=$groupkey (${groupkey.getClass().simpleName}), meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Group by sample id and dataset id
-        .groupTuple()
-        .view { it -> "FASTQ GROUPED 2: $it" }
+        .groupTuple(sort: 'hash')
+        //.view { groupkey, fastqs -> "FASTQ GROUPED 2: groupkey=$groupkey (${groupkey.getClass().simpleName}), fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Combine a list of fastq files
-        .map { _groupkey, meta, fastqlists -> tuple( meta, fastqlists.flatten() ) }
-        .view { it -> "FASTQ FINAL: $it" }
+        .map { groupkey, fastqlist -> tuple( groupkey.getGroupTarget(), fastqlist.flatten() ) }
+        //.view { meta, fastqs -> "FASTQ FINAL: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
     
     // Collect metadata files per dataset
     metadata = REPROCESS10X_PARSEMETADATA.out.links
@@ -94,7 +85,7 @@ workflow DOWNLOAD10X {
             REPROCESS10X_PARSEMETADATA.out.txt,
             REPROCESS10X_PARSEMETADATA.out.soft
         )
-        .groupTuple()
+        .groupTuple(sort: 'hash')
         .map { meta, files -> tuple( meta, files.flatten() ) }
     
     // Collect versions
@@ -106,7 +97,7 @@ workflow DOWNLOAD10X {
         )
 
     emit:
-    fastq    = fastq_files
+    fastq    = fastqs
     metadata = metadata
     versions = versions
 }
