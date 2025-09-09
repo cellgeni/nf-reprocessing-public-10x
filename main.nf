@@ -80,6 +80,22 @@ workflow {
     STARSOLO10X_MOUSE(fastqs.mouse, mouse_reference, params.wl_basedir)
 
     // STEP 3: Collect outputs
+    // Collect mapping QC
+    STARSOLO10X_HUMAN.out.qc_stats
+        .mix(STARSOLO10X_MOUSE.out.qc_stats)
+        .splitCsv(sep: '\t', skip: 1)
+        .collectFile(
+            name: 'mapping_qc_stats.tsv',
+            storeDir: params.output_dir,
+            newLine: true,
+            sort: { line -> line.split('\t')[0] },  // sort by first column (sample ID),
+            seed: "Sample\tRd_all\tRd_in_cells\tFrc_in_cells\tUMI_in_cells\tCells\tMed_nFeature\tGood_BC\tWL\tSpecies\tPaired\tStrand\tall_u+m\tall_u\texon_u+m\texon_u\tfull_u+m\tfull_u"
+        ) { row -> 
+            row.join('\t')
+        }
+        .subscribe { __ -> 
+                log.info("Mapping QC stats saved to ${params.output_dir}/mapping_qc_stats.tsv")
+            }
 
     // Collect versions
     DOWNLOAD10X.out.versions
