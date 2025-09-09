@@ -16,15 +16,18 @@ process REPROCESS10X_STARSOLO {
     bam_options = task.ext.bam_options ?: '--outSAMtype None --outReadsUnmapped Fastx'
     prefix = "${meta.id}"
     """
+    # Write the path to workdir
+    workdir=\$PWD
+
     # Move fastqs to sample directory
     mkdir -p "fastqs/${meta.id}"
     mv fastqs/*.gz "fastqs/${meta.id}/"
 
     # Run STARsolo
     source starsolo_10x_auto.sh
-    starsolo_10x fastqs $prefix ${task.cpus} $reference $whitelists $bam_options
+    starsolo_10x fastqs $prefix ${task.cpus} "\$PWD/$reference" "\$PWD/$whitelists" "$bam_options"
 
-    cat <<-END_VERSIONS > versions.yml
+    cat <<-END_VERSIONS > "\$workdir/versions.yml"
     "${task.process}":
         STAR: \$(STAR --version)
     END_VERSIONS
