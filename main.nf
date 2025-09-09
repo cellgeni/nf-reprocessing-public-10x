@@ -88,10 +88,10 @@ workflow {
             name: 'mapping_qc_stats.tsv',
             storeDir: params.output_dir,
             newLine: true,
-            sort: { line -> line.split('\t')[0] },  // sort by first column (sample ID),
-            seed: "Sample\tRd_all\tRd_in_cells\tFrc_in_cells\tUMI_in_cells\tCells\tMed_nFeature\tGood_BC\tWL\tSpecies\tPaired\tStrand\tall_u+m\tall_u\texon_u+m\texon_u\tfull_u+m\tfull_u"
-        ) { row -> 
-            row.join('\t')
+            sort: { line -> line.split('\t').take(2).join('') },  // sort by first two columns (Dataset, sample ID),
+            seed: "Dataset\tSample\tRd_all\tRd_in_cells\tFrc_in_cells\tUMI_in_cells\tCells\tMed_nFeature\tGood_BC\tWL\tSpecies\tPaired\tStrand\tall_u+m\tall_u\texon_u+m\texon_u\tfull_u+m\tfull_u"
+        ) { meta, row -> 
+            "${meta.id}\t${row.join('\t')}"
         }
         .subscribe { __ -> 
                 log.info("Mapping QC stats saved to ${params.output_dir}/mapping_qc_stats.tsv")
