@@ -15,7 +15,7 @@ process REPROCESS10X_PARSEMETADATA {
 
 
     script:
-    def datasetstring = sample_ids ? sample_ids.join("\n") : ''
+    def datasetstring = sample_ids ? sample_ids.join("\\n") : ''
     """
     # Create a sample list file
     echo -e "$datasetstring" > sample.list
