@@ -60,13 +60,10 @@ workflow {
             mouse: meta.specie == 'Mus musculus'
             other: true
         }
-    
-    // STEP2: Run STARsolo on fastq files for human and mouse samples
-    human_reference = channel.value(file( params.human_reference ))
-    mouse_reference = channel.value(file( params.mouse_reference ))
 
-    STARSOLO10X_HUMAN(fastqs.human, human_reference, params.wl_basedir)
-    STARSOLO10X_MOUSE(fastqs.mouse, mouse_reference, params.wl_basedir)
+    //fastqs.human.view { meta, fastq -> "HUMAN: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastq (${fastq.getClass().simpleName})" }
+    //fastqs.mouse.view { meta, fastq -> "MOUSE: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastq (${fastq.getClass().simpleName})" }
+    //fastqs.other.view { meta, fastq -> "OTHER: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastq (${fastq.getClass().simpleName})" }
 
     // Warn user if there are unexpected species detected
     fastqs.other.count().subscribe { count ->
@@ -74,6 +71,13 @@ workflow {
             log.warn "Detected ${count} fastq files from unexpected species"
         }
     }
+    
+    // STEP2: Run STARsolo on fastq files for human and mouse samples
+    human_reference = channel.value(file( params.human_reference ))
+    mouse_reference = channel.value(file( params.mouse_reference ))
+
+    STARSOLO10X_HUMAN(fastqs.human, human_reference, params.wl_basedir)
+    STARSOLO10X_MOUSE(fastqs.mouse, mouse_reference, params.wl_basedir)
 
     // STEP 3: Collect outputs
 
