@@ -5,7 +5,7 @@ process REPROCESS10X_STARSOLO {
     
     input:
     tuple val(meta), path(fastqs, stageAs: "fastqs/*")
-    path(reference, stageAs: 'reference')
+    tuple val(ref_meta), path(reference, stageAs: "reference")
     path(whitelists, stageAs: 'whitelists')
 
     output:
@@ -23,9 +23,13 @@ process REPROCESS10X_STARSOLO {
     mkdir -p "fastqs/${meta.id}"
     mv fastqs/*.gz "fastqs/${meta.id}/"
 
+    # Rename reference directory so that it contains specie name
+    mkdir -p "${ref_meta.id}"
+    mv "$reference" "${ref_meta.id}/reference"    
+
     # Run STARsolo
     source starsolo_10x_auto.sh
-    starsolo_10x fastqs $prefix ${task.cpus} "\$PWD/$reference" "\$PWD/$whitelists" "$bam_options"
+    starsolo_10x fastqs $prefix ${task.cpus} "\$PWD/${ref_meta.id}/reference" "\$PWD/$whitelists" "$bam_options" "${ref_meta.id}"
 
     cat <<-END_VERSIONS > "\$workdir/versions.yml"
     "${task.process}":

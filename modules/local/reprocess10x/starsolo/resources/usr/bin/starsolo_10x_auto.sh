@@ -285,7 +285,7 @@ function write_config_file() {
 }
 
 # Executes the main STARsolo alignment.
-# Args: Takes 13 arguments for all STARsolo parameters.
+# Args: Takes 14 arguments for all STARsolo parameters.
 function run_starsolo() {
     local PAIRED=$1
     local R1=$2
@@ -299,7 +299,13 @@ function run_starsolo() {
     local REF=${10}
     local CPUS=${11}
     local SOLOFILENAMES=${12}
-    local CMD=${13:-""}
+    local SPECIE=${13}
+    local CMD=${14:-""}
+
+    local SOLOFEATURES="Gene GeneFull"
+    if [[ $SPECIE != "mouse" && $PAIRED != "True" ]]; then
+        SOLOFEATURES="Gene GeneFull Velocyto"
+    fi
 
     if [[ $PAIRED == "True" ]]; then
         # Note the R1/R2 order and --soloStrand Forward for 5' paired-end.
@@ -307,13 +313,13 @@ function run_starsolo() {
             --soloType CB_UMI_Simple --soloCBwhitelist "$BC" --soloCBstart 1 --soloCBlen "$CBLEN" --soloUMIstart $((CBLEN + 1)) --soloUMIlen "$UMILEN" --soloStrand Forward \
             --soloUMIdedup 1MM_CR --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloUMIfiltering MultiGeneUMI_CR \
             --soloCellFilter EmptyDrops_CR --outFilterScoreMin 30 --genomeLoad LoadAndRemove \
-            --soloFeatures Gene GeneFull Velocyto --soloOutFileNames "$SOLOFILENAMES" features.tsv barcodes.tsv matrix.mtx --soloMultiMappers EM
+            --soloFeatures $SOLOFEATURES --soloOutFileNames "$SOLOFILENAMES" features.tsv barcodes.tsv matrix.mtx --soloMultiMappers EM
     else
         $CMD STAR --runThreadN "$CPUS" --genomeDir "$REF" --readFilesIn "$R2" "$R1" --runDirPerm All_RWX $GZIP $BAM \
             --soloType CB_UMI_Simple --soloCBwhitelist "$BC" --soloBarcodeReadLength 0 --soloCBlen "$CBLEN" --soloUMIstart $((CBLEN + 1)) --soloUMIlen "$UMILEN" --soloStrand "$STRAND" \
             --soloUMIdedup 1MM_CR --soloCBmatchWLtype 1MM_multi_Nbase_pseudocounts --soloUMIfiltering MultiGeneUMI_CR \
             --soloCellFilter EmptyDrops_CR --clipAdapterType CellRanger4 --outFilterScoreMin 30 --genomeLoad LoadAndRemove \
-            --soloFeatures Gene GeneFull Velocyto --soloOutFileNames "$SOLOFILENAMES" features.tsv barcodes.tsv matrix.mtx --soloMultiMappers EM
+            --soloFeatures $SOLOFEATURES --soloOutFileNames "$SOLOFILENAMES" features.tsv barcodes.tsv matrix.mtx --soloMultiMappers EM
     fi
 }
 
@@ -353,7 +359,8 @@ function starsolo_10x() {
     local REF=$4
     local WL=$5
     local BAM=$6
-    local CMD=${7:-""}
+    local SPECIE=$7
+    local CMD=${8:-""}
 
     local FQDIR_ABS
     FQDIR_ABS=$(readlink -f "$FQDIR")
@@ -396,7 +403,7 @@ function starsolo_10x() {
     write_config_file "$TAG" "$PAIRED" "$STRAND" "$PCTFWD" "$PCTREV" "$BC" "$NBC1" "$NBC2" "$NBC3" "$NBCA" "$NBC4" "$NBC5" "$CBLEN" "$UMILEN" "$GZIP" "$R1" "$R2"
 
     local SOLOFILENAMES="output/"
-    run_starsolo "$PAIRED" "$R1" "$R2" "$GZIP" "$BAM" "$BC" "$CBLEN" "$UMILEN" "$STRAND" "$REF" "$CPUS" "$SOLOFILENAMES" "$CMD"
+    run_starsolo "$PAIRED" "$R1" "$R2" "$GZIP" "$BAM" "$BC" "$CBLEN" "$UMILEN" "$STRAND" "$REF" "$CPUS" "$SOLOFILENAMES" "$SPECIE" "$CMD"
 
     process_output_files "$CMD"
 }
@@ -428,7 +435,7 @@ function main () {
     # local BAM="--outSAMtype BAM SortedByCoordinate --outBAMsortingBinsN 500 --limitBAMsortRAM 60000000000 --outSAMunmapped Within --outMultimapperOrder Random --runRNGseed 1 --outSAMattributes NH HI AS nM CB UB CR CY UR UY GX GN"
     local BAM="--outSAMtype None --outReadsUnmapped Fastx"
 
-    starsolo_10x "$FQDIR" "$TAG" "$CPUS" "$REF" "$WL" "$BAM" "$CMD"
+    starsolo_10x "$FQDIR" "$TAG" "$CPUS" "$REF" "$WL" "$BAM" "$SPECIE" "$CMD"
 }
 
 # This construct ensures that main() is called only when the script is executed directly.
