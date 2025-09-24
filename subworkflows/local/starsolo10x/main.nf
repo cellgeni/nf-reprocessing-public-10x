@@ -4,7 +4,7 @@ workflow STARSOLO10X {
 
     take:
     fastq_files   // channel: [ val(meta), [ file(fastq) ] ] meta: [ id: sample_id, dataset_id: dataset_id ]
-    reference     // channel: path(genome_reference)
+    reference     // channel: [ val(meta), path(genome_reference) ] meta: [ id: reference_id ]
     wl_basedir    // channel: [ dirpath ] a path to whitelist base directory (see https://github.com/cellgeni/nf-reprocessing-public-10x/tree/main/data/whitelists/)
 
     main:
@@ -23,7 +23,7 @@ workflow STARSOLO10X {
         }
         //.view { meta, sample_dir -> "SAMPLES BY DATASET: meta=[${meta.hasProperty('groupTarget') ? "GroupKey(${meta.getGroupTarget()}, size=${meta.getGroupSize()})" : meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], sample_dir=$sample_dir (${sample_dir.getClass().simpleName})" }
         // Group by dataset
-        .groupTuple(sort: 'hash')
+        .groupTuple(sort: 'hash', remainder: true)
         //.view { meta, samples -> "SAMPLES GROUPED BY DATASET: meta=[${meta.hasProperty('groupTarget') ? "GroupKey(${meta.getGroupTarget()}, size=${meta.getGroupSize()})" : meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], samples=$samples (${samples.getClass().simpleName})" }
     
     // Collect mapping QC stats

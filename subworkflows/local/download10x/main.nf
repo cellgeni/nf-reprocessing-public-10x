@@ -19,7 +19,7 @@ workflow DOWNLOAD10X {
         .splitCsv(sep: '\t', strip: true)
         // Group by sample to count number of runs per sample
         .map { meta, row -> tuple( row[4], [meta, row] ) }
-        .groupTuple(sort: 'hash')
+        .groupTuple(sort: 'hash', remainder: true)
         .map { _sample_id, metas_rows -> tuple( metas_rows.size(), metas_rows ) }
         .transpose()
         // Flatten the rows
@@ -55,7 +55,7 @@ workflow DOWNLOAD10X {
     fastqs = REPROCESS10X_LOADDATA.out.fastq
         // Combine fastq files for each run as they were loaded separately
         //.view { meta, fastq -> "FASTQ LOADED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastq=$fastq (${fastq.getClass().simpleName})" }
-        .groupTuple(size: 2, sort: 'hash')
+        .groupTuple(size: 2, sort: 'hash', remainder: true)
         //.view { meta, fastqs -> "FASTQ GROUPED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Combine fastq files from BAM and SRA conversion
         .mix(
@@ -71,7 +71,7 @@ workflow DOWNLOAD10X {
         }
         //.view { groupkey, meta, fastqs -> "FASTQ PRE-GROUPED: groupkey=$groupkey (${groupkey.getClass().simpleName}), meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Group by sample id and dataset id
-        .groupTuple(sort: 'hash')
+        .groupTuple(sort: 'hash', remainder: true)
         //.view { groupkey, fastqs -> "FASTQ GROUPED 2: groupkey=$groupkey (${groupkey.getClass().simpleName}), fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Combine a list of fastq files
         .map { groupkey, fastqlist -> tuple( groupkey.getGroupTarget(), fastqlist.flatten() ) }

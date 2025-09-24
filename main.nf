@@ -73,8 +73,8 @@ workflow {
     }
     
     // STEP2: Run STARsolo on fastq files for human and mouse samples
-    human_reference = channel.value(file( params.human_reference ))
-    mouse_reference = channel.value(file( params.mouse_reference ))
+    human_reference = channel.value(tuple( [id: "human"], file( params.human_reference ) ))
+    mouse_reference = channel.value(tuple( [id: "mouse"], file( params.mouse_reference ) ))
 
     STARSOLO10X_HUMAN(fastqs.human, human_reference, params.wl_basedir)
     STARSOLO10X_MOUSE(fastqs.mouse, mouse_reference, params.wl_basedir)
