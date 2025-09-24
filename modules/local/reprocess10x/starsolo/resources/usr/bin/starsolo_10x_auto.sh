@@ -302,9 +302,9 @@ function run_starsolo() {
     local SPECIE=${13}
     local CMD=${14:-""}
 
-    local SOLOFEATURES="Gene GeneFull"
-    if [[ $SPECIE != "mouse" && $PAIRED != "True" ]]; then
-        SOLOFEATURES="Gene GeneFull Velocyto"
+    local SOLOFEATURES="Gene GeneFull Velocyto"
+    if [[ $SPECIE == "mouse" && $PAIRED == "True" ]]; then
+        SOLOFEATURES="Gene GeneFull"
     fi
 
     if [[ $PAIRED == "True" ]]; then
