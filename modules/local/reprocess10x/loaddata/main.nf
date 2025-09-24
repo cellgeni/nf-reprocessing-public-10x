@@ -1,3 +1,15 @@
+def getFileName(filepath, sample_id) {
+    if ( filepath ==~ /.*fastq\.gz/ ) {
+        return "fastq/${sample_id}/$filepath"
+    } else if ( filepath ==~ /.*\.bam/ ) {
+        return "bam/${sample_id}/$filepath"
+    } else if ( filepath != "versions.yml" ) {
+        return "sra/${sample_id}/$filepath"
+    } else {
+        return null
+    }
+}
+
 process REPROCESS10X_LOADDATA {
     tag "Loading $prefix"
 
