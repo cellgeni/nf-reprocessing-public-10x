@@ -20,6 +20,8 @@ function sra2fastq {
     $CMD seqtk sample -s100 $i 200000 | awk 'NR%4==2' | cut -c-16 | grep -F -f $WL/737K-august-2016.txt   | wc -l > $i.v2.count &
     $CMD seqtk sample -s100 $i 200000 | awk 'NR%4==2' | cut -c-16 | grep -F -f $WL/3M-february-2018.txt   | wc -l > $i.v3.count &
     $CMD seqtk sample -s100 $i 200000 | awk 'NR%4==2' | cut -c-16 | grep -F -f $WL/737K-arc-v1.txt        | wc -l > $i.arc.count &
+    $CMD seqtk sample -s100 $i 200000 | awk 'NR%4==2' | cut -c-16 | grep -F -f $WL/3M-3pgex-may-2023.txt  | wc -l > $i.v4-3.count &
+    $CMD seqtk sample -s100 $i 200000 | awk 'NR%4==2' | cut -c-16 | grep -F -f $WL/3M-5pgex-jan-2023.txt  | wc -l > $i.v4-5.count &
   done 
 
   wait
