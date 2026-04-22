@@ -11,7 +11,7 @@ def getFileName(filepath, sample_id) {
 }
 
 process REPROCESS10X_LOADDATA {
-    tag "Loading $prefix"
+    tag "Loading ${meta.id}"
 
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'docker://quay.io/cellgeni/reprocess_10x:latest':
@@ -21,14 +21,14 @@ process REPROCESS10X_LOADDATA {
     tuple val(meta), val(link)
 
     output:
-    tuple val(meta), path("$meta.id"),             emit: sra,   optional: true
+    tuple val(meta), path("${meta.id}"),             emit: sra,   optional: true
     tuple val(meta), path("*.f*q*"),               emit: fastq, optional: true
     tuple val(meta), path("*.bam"),                emit: bam,   optional: true
     path "versions.yml"           , emit: versions
 
     script:
     def args = task.ext.args ?: ''
-    prefix = "${meta.id}"
+    def prefix = "${meta.id}"
     """
     # Download file
     wget $args $link

@@ -1,7 +1,7 @@
 process REPROCESS10X_STARSOLO {
-    tag "Renaming fastq files $prefix"
+    tag "Renaming fastq files ${meta.id}"
 
-    container "docker://quay.io/cellgeni/reprocess_10x:latest"
+    container "docker://quay.io/cellgeni/starsolo:v4.1"
     
     input:
     tuple val(meta), path(fastqs, stageAs: "fastqs/*")
@@ -9,12 +9,11 @@ process REPROCESS10X_STARSOLO {
     path(whitelists, stageAs: 'whitelists')
 
     output:
-    tuple val(meta), path("$prefix"), emit: mapping
+    tuple val(meta), path("${meta.id}"), emit: mapping
     path "versions.yml", emit: versions
 
     script:
-    bam_options = task.ext.bam_options ?: '--outSAMtype None --outReadsUnmapped Fastx'
-    prefix = "${meta.id}"
+    def prefix = "${meta.id}"
     """
     # Write the path to workdir
     workdir=\$PWD
@@ -28,12 +27,12 @@ process REPROCESS10X_STARSOLO {
     mv "$reference" "${ref_meta.id}/reference"    
 
     # Run STARsolo
-    source starsolo_10x_auto.sh
-    starsolo_10x fastqs $prefix ${task.cpus} "\$PWD/${ref_meta.id}/reference" "\$PWD/$whitelists" "$bam_options" "${ref_meta.id}"
+    starsolo 10x fastqs "$prefix" --ref "\$PWD/${ref_meta.id}/reference" --whitelist "\$PWD/$whitelists" --no-bam --cpus ${task.cpus}
 
     cat <<-END_VERSIONS > "\$workdir/versions.yml"
     "${task.process}":
         STAR: \$(STAR --version)
+        cellgeni/STARsolo: \$(starsolo --version)
     END_VERSIONS
     """
 }

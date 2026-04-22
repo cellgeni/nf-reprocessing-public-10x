@@ -30,7 +30,7 @@ def helpMessage() {
 }
 
 workflow {
-    if (params.help) {
+    if (params.help || !params.datasets) {
         helpMessage()
         System.exit(0)
     } 
@@ -88,7 +88,6 @@ workflow {
             name: 'mapping_qc_stats.tsv',
             storeDir: params.output_dir,
             newLine: true,
-            sort: { line -> line.split('\t').take(2).join('') },  // sort by first two columns (Dataset, sample ID),
             seed: "Dataset\tSample\tRd_all\tRd_in_cells\tFrc_in_cells\tUMI_in_cells\tCells\tMed_nFeature\tGood_BC\tWL\tSpecies\tPaired\tStrand\tall_u+m\tall_u\texon_u+m\texon_u\tfull_u+m\tfull_u"
         ) { meta, row -> 
             "${meta.id}\t${row.join('\t')}"
