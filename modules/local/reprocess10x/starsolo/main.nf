@@ -1,5 +1,5 @@
 process REPROCESS10X_STARSOLO {
-    tag "Renaming fastq files ${meta.id}"
+    tag "${meta.id}"
 
     container "docker://quay.io/cellgeni/starsolo:v4.1"
     
@@ -27,7 +27,7 @@ process REPROCESS10X_STARSOLO {
     mv "$reference" "${ref_meta.id}/reference"    
 
     # Run STARsolo
-    starsolo 10x fastqs "$prefix" --ref "\$PWD/${ref_meta.id}/reference" --whitelist "\$PWD/$whitelists" --no-bam --cpus ${task.cpus}
+    starsolo 10x fastqs "$prefix" --ref "\$PWD/${ref_meta.id}/reference" --whitelist-dir "\$PWD/$whitelists" --no-bam --cpus ${task.cpus}
 
     cat <<-END_VERSIONS > "\$workdir/versions.yml"
     "${task.process}":
