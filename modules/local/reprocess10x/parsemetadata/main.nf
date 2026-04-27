@@ -1,6 +1,6 @@
 process REPROCESS10X_PARSEMETADATA {
     tag "Parsing metadata for $meta.id"
-    container "${ workflow.containerEngine == 'singularity' ? 'docker://quay.io/cellgeni/reprocess_10x:dev': 'quay.io/cellgeni/reprocess_10x:dev' }"
+    //container "quay.io/cellgeni/starsolo:v4.1"
 
     input:
     tuple val(meta), val(sample_ids)
@@ -26,7 +26,8 @@ process REPROCESS10X_PARSEMETADATA {
     # Add sample IDs to metadata
     add_samples.awk ${meta.id}.sample_x_run.tsv ${meta.id}.parsed.tsv > links.tsv
 
-    reprocess_version=\$(grep reprocess /versions.txt | cut -d ':' -f 2)
+    #reprocess_version=\$(grep reprocess /versions.txt | cut -d ':' -f 2)
+    reprocess_version=4.1
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         cellgeni/reprocess_public_10x: \$reprocess_version
@@ -40,7 +41,7 @@ process REPROCESS10X_PARSEMETADATA {
     
     touch ${prefix}.bam
 
-    reprocess_version=\$(grep reprocess /versions.txt | cut -d ':' -f 2)
+    reprocess_version=4.1
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         cellgeni/reprocess_public_10x: \$reprocess_version
