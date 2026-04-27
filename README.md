@@ -1,17 +1,72 @@
 # nf-reprocessing-public-10x
-Nextflow pipeline of our reprocessing [pipeline](https://github.com/cellgeni/reprocess_public_10x).
 
-## Contents of Repo:
-* `main.nf` - the Nextflow pipeline that executes reprocessing.
-* `nextflow.config` - the configuration script that allows the processes to be submitted to IBM LSF on Sanger's HPC and ensures correct environment is set via singularity container (this is an absolute path). Global default parameters are also set in this file and some contain absolute paths.
-* `examples/samples.list` - example of the expected samplefile containing series IDs and optionally sample IDs.
-* `examples/RESUME` - an example run script that executes the pipeline it has 1 hardcoded argument: `/path/to/sample.list` which you will need to change on your installation. 
-* `bin` - a directory containing various scripts the pipeline uses to download project data and realign the data with STARsolo.
-* `Dockerfile` - a dockerfile to reproduce the environment for step3, step5 has its own container that has its Dockerfile located [here](https://github.com/cellgeni/STARsolo/blob/main/Dockerfile)
+Nextflow pipeline for loading and reprocessing public 10x datasets from GEO, SRA, ENA, or ArrayExpress.
 
-## Pipeline Arguments:
-* `--samplefile` - The path to the sample file provided to the pipeline which contains one sample ID per line. This sample is assumed to have CRAM files stored on IRODS.
-* `--outdir` - The path to where the results will be saved.
-* `--run_starsolo` - Tells pipeline whether to realign data with STARsolo or not
-* `--keep_bams` - Tells the pipeline whether to generate BAM files (default false means do not generate).
-* `--sort_bam_mem` - Input memory (IN BYTES) for starsolo to use for sorting BAM files if BAM files are kept (default 60GB = 60000000000B).
+## Repo structure
+
+| Path | Description |
+|---|---|
+| `main.nf` | Main Nextflow pipeline |
+| `nextflow.config` | Pipeline configuration — LSF executor, Singularity, and default params |
+| `examples/datasets.tsv` | Example input file with dataset and sample IDs |
+| `examples/RESUME` | Example run script |
+| `subworkflows/` | Download and STARsolo alignment subworkflows |
+| `modules/` | Individual process modules |
+
+## Usage
+
+```bash
+nextflow run main.nf --datasets <datasets.tsv> [OPTIONS]
+```
+
+### Parameters
+
+| Parameter | Description | Default |
+|---|---|---|
+| `--datasets` | Path to a TSV file with dataset and sample IDs | required |
+| `--output_dir` | Directory to save results | `results` |
+| `--help` | Print help message and exit | — |
+
+### Input file format
+
+The `--datasets` TSV file must have a header row with two columns:
+
+```tsv
+dataset_id	sample_id
+GSE230685	GSM7232572,GSM7232573
+E-MTAB-9221	ERS4689152,ERS4689153
+PRJEB37166	ERS4605100,ERS4605101
+```
+
+- `dataset_id` — GEO series (GSE), ENA study (PRJEB/PRJNA), or ArrayExpress accession (E-MTAB-*)
+- `sample_id` — comma-separated list of sample accessions belonging to that dataset
+
+See [examples/datasets.tsv](examples/datasets.tsv) for a full example.
+
+## Quick example
+
+```bash
+nextflow run main.nf \
+  -profile standard \
+  --datasets examples/datasets.tsv \
+  --output_dir results \
+  --ansi-log false \
+  -resume
+```
+
+## Output
+
+Results are written to `--output_dir` (default: `results/`):
+
+| File | Description |
+|---|---|
+| `mapping_qc_stats.tsv` | Per-sample STARsolo mapping QC statistics |
+| `versions.yml` | Software versions for all pipeline steps |
+| `<dataset_id>/` | STARsolo count matrices per dataset |
+
+## Profiles
+
+| Profile | Description |
+|---|---|
+| `standard` | LSF cluster at Sanger (default) — uses Singularity |
+| `development` | Local execution — uses Docker |
