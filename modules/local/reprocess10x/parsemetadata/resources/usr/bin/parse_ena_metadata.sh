@@ -52,7 +52,7 @@ do
     LOC=$ENAGZ
     echo $ENAGZ | tr ';' '\n' >> $SERIES.urls.list
     >&2 echo "Sample $i is available via ENA as a paired-end fastq: $LOC"
-  elif [[ $ORIFQ != "" ]]
+  elif [[ $ORIFQ != "" && $ORIBAM == "" ]]
   then
     TYPE="ORIFQ"
     LOC=$ORIFQ
