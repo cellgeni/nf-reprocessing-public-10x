@@ -19,7 +19,6 @@ process REPROCESS10X_MAPPINGQC {
     """
     starsolo qc */ > ${prefix}.solo_qc.tsv
 
-    reprocess_version=\$(grep reprocess /versions.txt | cut -d ':' -f 2)
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         cellgeni/STARsolo: \$(starsolo --version)
