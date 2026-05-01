@@ -53,24 +53,40 @@ workflow {
         params.wl_basedir
     )
 
+    // Resolve effective specie for each sample:
+    //   --specie human/mouse  → override all samples to that specie
+    //   --specie auto         → use meta.specie from metadata; fall back to --default_specie if blank/NULL/UNKNOWN
+    def unknown_values = [null, '', 'NULL', 'UNKNOWN']
+    resolved_fastqs = DOWNLOAD10X.out.fastq
+        .map { meta, fastqs ->
+            def effective_specie
+            if (params.specie == 'human') {
+                effective_specie = 'Homo sapiens'
+            } else if (params.specie == 'mouse') {
+                effective_specie = 'Mus musculus'
+            } else {
+                effective_specie = (meta.specie in unknown_values) ? params.default_specie : meta.specie
+            }
+            if (effective_specie in unknown_values) {
+                log.warn "Sample ${meta.id} (${meta.dataset_id}) has unknown species and no --default_specie set — skipping STARsolo"
+            }
+            [meta + [specie: effective_specie], fastqs]
+        }
+
     // Group samples by specie
-    fastqs = DOWNLOAD10X.out.fastq
+    fastqs = resolved_fastqs
         .branch { meta, _fastqs ->
             human: meta.specie == 'Homo sapiens'
             mouse: meta.specie == 'Mus musculus'
             other: true
         }
 
-    //fastqs.human.view { meta, fastq -> "HUMAN: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastq (${fastq.getClass().simpleName})" }
-    //fastqs.mouse.view { meta, fastq -> "MOUSE: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastq (${fastq.getClass().simpleName})" }
-    //fastqs.other.view { meta, fastq -> "OTHER: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastq (${fastq.getClass().simpleName})" }
-
-    // Warn user if there are unexpected species detected
-    fastqs.other.count().subscribe { count ->
-        if (count > 0) {
-            log.warn "Detected ${count} fastq files from unexpected species"
+    fastqs.other
+        .map { meta, _fastqs ->
+            log.warn "Sample ${meta.id} (${meta.dataset_id}) has unexpected species '${meta.specie}' — skipping STARsolo"
+            [meta, _fastqs]
         }
-    }
+
     
     // STEP2: Run STARsolo on fastq files for human and mouse samples
     human_reference = channel.value(tuple( [id: "human"], file( params.human_reference ) ))
