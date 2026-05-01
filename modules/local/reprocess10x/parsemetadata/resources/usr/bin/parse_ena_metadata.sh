@@ -18,6 +18,7 @@ do
     AEGZ=`grep -w $i $SERIES.sdrf.txt | tr '\t' '\n' | grep "ftp://.*\.f.*q" | tr '\n' ';' | sed "s/;$//"`
   fi 
   SPECIES=`grep -w $i $SERIES.ena.tsv | cut -f10`
+  SPECIES=${SPECIES:-UNKNOWN}
   ENAGZ=`grep -w $i $SERIES.ena.tsv | cut -f11 | grep "_1\.fastq.gz" | grep "_2\.fastq.gz"`     ## ENA formatting is strict
   ORIFQ=`grep -w $i $SERIES.ena.tsv | cut -f12 | grep "f.*q"`                                   ## ppl name files *all kinds of random shiz*, really
   ORIBAM=`grep -w $i $SERIES.ena.tsv | cut -f12 | tr ';' '\n' | grep -v "\.bai" | grep "\.bam"` ## don't need the BAM index which is often there

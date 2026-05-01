@@ -14,6 +14,7 @@ do
   LOC=""
 
   SPECIES=`grep -w $i $SERIES.sra.tsv | cut -f29`
+  SPECIES=${SPECIES:-UNKNOWN}
   SRA=`grep -w $i $SERIES.sra.tsv | cut -f10` 
   SRABAM=`curl -s "https://locate.ncbi.nlm.nih.gov/sdl/2/retrieve?acc=$i&accept-alternate-locations=yes" | jq -r '
           .result[].files[] | 
