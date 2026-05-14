@@ -1,15 +1,3 @@
-def getFileName(filepath, sample_id) {
-    if ( filepath ==~ /.*fastq\.gz/ ) {
-        return "fastq/${sample_id}/$filepath"
-    } else if ( filepath ==~ /.*\.bam/ ) {
-        return "bam/${sample_id}/$filepath"
-    } else if ( filepath != "versions.yml" ) {
-        return "sra/${sample_id}/$filepath"
-    } else {
-        return null
-    }
-}
-
 process REPROCESS10X_LOADDATA {
     tag "Loading ${meta.id}"
 
@@ -38,7 +26,7 @@ process REPROCESS10X_LOADDATA {
     if [[ "${meta.type}" == "BAM" && ! -f "${prefix}.bam" ]]; then
         mv -T *.bam* "${prefix}.bam"
     elif [[ "${meta.type}" == "SRA" && ! -f "${prefix}" ]]; then
-        mv -T SRR!(*.urls.list) "${prefix}"
+        mv -T [ESD]RR!(*.urls.list) "${prefix}"
     fi
 
     # save versions
