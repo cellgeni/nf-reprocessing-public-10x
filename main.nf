@@ -1,7 +1,4 @@
 // IMPORT SUBWORKFLOW
-include { DOWNLOAD10X } from './subworkflows/local/download10x/'
-include { STARSOLO10X as STARSOLO10X_HUMAN } from './subworkflows/local/starsolo10x/'
-include { STARSOLO10X as STARSOLO10X_MOUSE } from './subworkflows/local/starsolo10x/'
 include { REPROCESS10X } from './workflow/main.nf'
 
 // HELP MESSAGE
