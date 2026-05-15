@@ -40,17 +40,25 @@ def helpMessage() {
 
     == Output structure ==
     results/
-      raw/<dataset_id>/fastq/<sample_id>/   FASTQs
-      raw/<dataset_id>/bam/<sample_id>/     10x BAM files
-      raw/<dataset_id>/sra/<sample_id>/     SRA files
-      starsolo/<dataset_id>/                STARsolo count matrices and QC stats
-      metadata/<dataset_id>/                Metadata files (links, parsed TSVs, SOFT, etc.)
-      index/fastq.csv                       Index of all published FASTQs
-      index/bam.csv                         Index of all published BAMs
-      index/sra.csv                         Index of all published SRA files
-      index/starsolo.csv                    Index of all STARsolo outputs
-      versions.yml                          Software versions
-      mapping_qc_stats.tsv                  Per-sample STARsolo mapping QC statistics
+    ├── raw/
+    │   └── <dataset_id>/
+    │       ├── fastq/
+    │       │   └── <sample_id>/    FASTQs (R1, R2, I1)
+    │       ├── bam/
+    │       │   └── <sample_id>/    10x BAM files
+    │       └── sra/
+    │           └── <sample_id>/    SRA files
+    ├── starsolo/
+    │   └── <dataset_id>/           STARsolo count matrices and QC stats
+    ├── metadata/
+    │   └── <dataset_id>/           Metadata files (links, parsed TSVs, SOFT, etc.)
+    ├── index/
+    │   ├── fastq.csv               Index of all published FASTQs
+    │   ├── bam.csv                 Index of all published BAMs
+    │   ├── sra.csv                 Index of all published SRA files
+    │   └── starsolo.csv            Index of all STARsolo outputs
+    ├── versions.yml                Software versions
+    └── mapping_qc_stats.tsv        Per-sample STARsolo mapping QC statistics
     ==========================
     """.stripIndent()
 }
