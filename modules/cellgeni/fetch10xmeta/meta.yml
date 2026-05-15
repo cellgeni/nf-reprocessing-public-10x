@@ -1,11 +1,9 @@
-$schema: https://raw.githubusercontent.com/nextflow-io/schemas/refs/heads/main/module/v1/schema.json
-name: cellgeni/fetch10xmeta
-version: 0.0.4
+---
+name: "cellgeni/fetch10xmeta"
 description: >
   Fetches and parses metadata for public 10x datasets from GEO (GSE*), ArrayExpress (E-MTAB*),
   or BioProject (PRJ*). Downloads raw metadata from SRA/ENA/BioStudies, resolves sample-to-run
   mappings, classifies each run by download type, and produces a merged links file.
-license: MIT
 keywords:
   - metadata
   - GEO
@@ -16,57 +14,72 @@ keywords:
   - 10x
   - single-cell
   - public data
+tools:
+  - collect_metadata.sh:
+      description: "Downloads and parses GEO/ArrayExpress/BioProject metadata, resolving sample-to-run mappings."
+      homepage: "https://github.com/cellgeni/nf-reprocessing-public-10x"
+      licence:
+        - "MIT"
 input:
-- - name: meta
-    type: map
-    description: >
-      Map with dataset-level metadata. Must contain key 'id' with the dataset accession.
-      Supported prefixes: GSE* (GEO), E-MTAB* (ArrayExpress), PRJ* (BioProject/ENA).
-  - name: sample_ids
-    type: string
-    description: >
-      Comma-separated sample accession IDs to restrict processing to (e.g. 'GSM7232572,GSM7232573',
-      'DRS408305,DRS408306'). If empty or null, all samples in the dataset are used.
+- - meta:
+      type: "map"
+      description: "Map with dataset-level metadata. Must contain key 'id' with the dataset accession.\ne.g. [ id:'GSE230685' ]\n"
+  - sample_ids:
+      type: "string"
+      description: >
+        Comma-separated sample accession IDs to restrict processing to
+        (e.g. 'GSM7232572,GSM7232573', 'DRS408305,DRS408306').
+        If empty or null, all samples in the dataset are used.
 output:
-- - name: meta
-    type: map
-    description: Map with dataset-level metadata, passed through from input.
-  - name: links
-    type: file
-    description: >
-      TSV file (links.tsv) — the parsed per-run metadata with an additional sample_id column
-      appended. Each row is one run; the final column maps it back to its source sample accession.
-- - name: meta
-    type: map
-    description: Map with dataset-level metadata, passed through from input.
-  - name: list
-    type: file
-    description: >
-      One or more list files (*.list) produced during metadata collection, including the run list
-      (*.run.list) and intermediate accession lists (*.sample.list, *.project.list, etc.).
-- - name: meta
-    type: map
-    description: Map with dataset-level metadata, passed through from input.
-  - name: tsv
-    type: file
-    description: >
-      TSV files (*.tsv) produced during metadata collection: raw SRA/ENA metadata
-      (*.sra.tsv / *.ena.tsv), accession mapping (*.accessions.tsv), sample-run mapping
-      (*.sample_x_run.tsv), and parsed per-run classification (*.parsed.tsv).
-- - name: meta
-    type: map
-    description: Map with dataset-level metadata, passed through from input.
-  - name: txt
-    type: file
-    description: Optional plain-text metadata files (*.txt), present for ArrayExpress datasets (SDRF/IDF).
-    optional: true
-- - name: meta
-    type: map
-    description: Map with dataset-level metadata, passed through from input.
-  - name: soft
-    type: file
-    description: Optional GEO SOFT format file (*_family.soft), present for GEO (GSE*) datasets.
-    optional: true
-- name: versions
-  type: file
-  description: YAML file recording the pipeline version used by this process.
+  links:
+  - - meta:
+        type: "map"
+        description: "Map with dataset-level metadata, passed through from input.\ne.g. [ id:'GSE230685' ]\n"
+    - links.tsv:
+        type: "file"
+        description: "TSV file with per-run metadata and an appended sample_id column mapping each run back to its source sample accession."
+        pattern: "links.tsv"
+  list:
+  - - meta:
+        type: "map"
+        description: "Map with dataset-level metadata, passed through from input.\ne.g. [ id:'GSE230685' ]\n"
+    - "*.list":
+        type: "file"
+        description: "Accession list files produced during metadata collection (*.run.list, *.sample.list, *.project.list, etc.)."
+        pattern: "*.list"
+  tsv:
+  - - meta:
+        type: "map"
+        description: "Map with dataset-level metadata, passed through from input.\ne.g. [ id:'GSE230685' ]\n"
+    - "*.tsv":
+        type: "file"
+        description: "TSV files from the collection pipeline: raw SRA/ENA metadata, accession mapping (*.accessions.tsv), sample-run mapping (*.sample_x_run.tsv), and parsed run classification (*.parsed.tsv)."
+        pattern: "*.tsv"
+  txt:
+  - - meta:
+        type: "map"
+        description: "Map with dataset-level metadata, passed through from input.\ne.g. [ id:'GSE230685' ]\n"
+    - "*.txt":
+        type: "file"
+        description: "Optional SDRF/IDF plain-text files, present for ArrayExpress (E-MTAB*) datasets."
+        pattern: "*.txt"
+        optional: true
+  soft:
+  - - meta:
+        type: "map"
+        description: "Map with dataset-level metadata, passed through from input.\ne.g. [ id:'GSE230685' ]\n"
+    - "*_family.soft":
+        type: "file"
+        description: "Optional GEO SOFT family file, present for GEO (GSE*) datasets."
+        pattern: "*_family.soft"
+        optional: true
+  versions:
+  - path: "versions.yml"
+    type: "file"
+    description: "YAML file recording the pipeline version used by this process."
+authors:
+  - "@aljes"
+maintainers:
+  - "@aljes"
+version: "0.0.4"
+license: "MIT"
