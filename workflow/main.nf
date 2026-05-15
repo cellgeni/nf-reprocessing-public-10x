@@ -1,6 +1,6 @@
 // IMPORT SUBWORKFLOW
 include { DOWNLOAD10X } from '../subworkflows/local/download10x/'
-include { FETCH10XMETA } from '../modules/cellgeni/fetch10xmeta/'
+include { FETCH10XMETA } from 'cellgeni/fetch10xmeta'
 include { STARSOLO10X as STARSOLO10X_HUMAN } from '../subworkflows/local/starsolo10x/'
 include { STARSOLO10X as STARSOLO10X_MOUSE } from '../subworkflows/local/starsolo10x/'
 
@@ -11,8 +11,8 @@ workflow REPROCESS10X {
     human_reference  // channel: [ tuple( [id: "human"], file(human_reference) ) ]
     mouse_reference  // channel: [ tuple( [id: "mouse"], file(mouse_reference) ) ]
     metaonlyflag     // channel: [ val(metaonlyflag) ] a flag to indicate whether to only fetch metadata without downloading data or running STARsolo (e.g. for testing or debugging)
-    no_infer_specie
-    default_specie
+    no_infer_specie  // channel: [ val(no_infer_specie) ] a flag to indicate whether to infer specie from metadata or not; if true, all samples will be assigned the default_specie (or 'UNKNOWN' if default_specie is not set)
+    default_specie   // channel: [ val(default_specie) ] the default specie to assign to samples with unknown species in metadata; if not set, 'UNKNOWN' will be used as default specie
 
     main:
     // STEP 0.1: Init channels
