@@ -7,7 +7,7 @@ function download_geo_family() {
 
   ## download the so-called soft_family file, and use it to generate same files as above
   local PAD=`echo $SERIES | perl -ne 's/\d{3}$/nnn/; print'`
-  wget -O ${SERIES}_family.soft.gz https://ftp.ncbi.nlm.nih.gov/geo/series/$PAD/$SERIES/soft/${SERIES}_family.soft.gz
+  wget --tries=5 --wait=10 --retry-connrefused --retry-on-http-error=503 -O ${SERIES}_family.soft.gz https://ftp.ncbi.nlm.nih.gov/geo/series/$PAD/$SERIES/soft/${SERIES}_family.soft.gz
   ## -f overwrites the old stuff
   gzip -fd ${SERIES}_family.soft.gz
   if [[ ! -s ${SERIES}_family.soft ]]
@@ -20,8 +20,8 @@ function download_geo_family() {
 function download_sdrf_idf_files() {
   local SERIES=$1
 
-  wget -O $SERIES.sdrf.txt https://www.ebi.ac.uk/biostudies/files/$SERIES/$SERIES.sdrf.txt
-  wget -O $SERIES.idf.txt https://www.ebi.ac.uk/biostudies/files/$SERIES/$SERIES.idf.txt
+  wget --tries=5 --wait=10 --retry-connrefused -O $SERIES.sdrf.txt https://www.ebi.ac.uk/biostudies/files/$SERIES/$SERIES.sdrf.txt
+  wget --tries=5 --wait=10 --retry-connrefused -O $SERIES.idf.txt https://www.ebi.ac.uk/biostudies/files/$SERIES/$SERIES.idf.txt
   
   if [[ ! -s $SERIES.sdrf.txt ]] 
   then
@@ -109,7 +109,7 @@ function get_subseries_from_family {
     for i in $SUBGSE
     do
       local PAD=`echo $i | perl -ne 's/\d{3}$/nnn/; print'`
-      wget -O ${i}_family.soft.gz https://ftp.ncbi.nlm.nih.gov/geo/series/$PAD/$i/soft/${i}_family.soft.gz
+      wget --tries=5 --wait=10 --retry-connrefused --retry-on-http-error=503 -O ${i}_family.soft.gz https://ftp.ncbi.nlm.nih.gov/geo/series/$PAD/$i/soft/${i}_family.soft.gz
       gzip -fd ${i}_family.soft.gz
       grep Series_relation ${i}_family.soft | perl -ne 'print "$1\n" if (m/(PRJ[A-Z]+\d+)/)' | sort | uniq >> $OUTPUT_FILE
     done

@@ -1,5 +1,9 @@
-process REPROCESS10X_PARSEMETADATA {
-    tag "Parsing metadata for $meta.id"
+/*
+ * Module: cellgeni/fetch10xmeta
+ */
+
+process FETCH10XMETA {
+    tag "${meta.id}"
     //container "quay.io/cellgeni/starsolo:v4.1"
 
     input:
@@ -15,7 +19,7 @@ process REPROCESS10X_PARSEMETADATA {
 
 
     script:
-    def datasetstring = sample_ids ? sample_ids.join("\\n") : ''
+    def datasetstring = sample_ids ? sample_ids.replace(",", "\\n") : ''
     """
     # Create a sample list file
     echo -e "$datasetstring" > sample.list
@@ -25,6 +29,9 @@ process REPROCESS10X_PARSEMETADATA {
 
     # Add sample IDs to metadata
     add_samples.awk ${meta.id}.sample_x_run.tsv ${meta.id}.parsed.tsv > links.tsv
+
+    # Remove sample list file
+    rm -f sample.list
 
     #reprocess_version=\$(grep reprocess /versions.txt | cut -d ':' -f 2)
     reprocess_version=4.1
