@@ -1,17 +1,98 @@
 # nf-reprocessing-public-10x
-Nextflow pipeline of our reprocessing [pipeline](https://github.com/cellgeni/reprocess_public_10x).
 
-## Contents of Repo:
-* `main.nf` - the Nextflow pipeline that executes reprocessing.
-* `nextflow.config` - the configuration script that allows the processes to be submitted to IBM LSF on Sanger's HPC and ensures correct environment is set via singularity container (this is an absolute path). Global default parameters are also set in this file and some contain absolute paths.
-* `examples/samples.list` - example of the expected samplefile containing series IDs and optionally sample IDs.
-* `examples/RESUME` - an example run script that executes the pipeline it has 1 hardcoded argument: `/path/to/sample.list` which you will need to change on your installation. 
-* `bin` - a directory containing various scripts the pipeline uses to download project data and realign the data with STARsolo.
-* `Dockerfile` - a dockerfile to reproduce the environment for step3, step5 has its own container that has its Dockerfile located [here](https://github.com/cellgeni/STARsolo/blob/main/Dockerfile)
+Nextflow pipeline for loading and reprocessing public 10x datasets from GEO, SRA, ENA, or ArrayExpress.
 
-## Pipeline Arguments:
-* `--samplefile` - The path to the sample file provided to the pipeline which contains one sample ID per line. This sample is assumed to have CRAM files stored on IRODS.
-* `--outdir` - The path to where the results will be saved.
-* `--run_starsolo` - Tells pipeline whether to realign data with STARsolo or not
-* `--keep_bams` - Tells the pipeline whether to generate BAM files (default false means do not generate).
-* `--sort_bam_mem` - Input memory (IN BYTES) for starsolo to use for sorting BAM files if BAM files are kept (default 60GB = 60000000000B).
+## Repo structure
+
+| Path | Description |
+|---|---|
+| `main.nf` | Main Nextflow pipeline entry point |
+| `nextflow.config` | Pipeline configuration — LSF executor, Singularity, and default params |
+| `workflow/main.nf` | Core workflow: metadata fetch, download, and STARsolo alignment |
+| `subworkflows/` | Download and STARsolo alignment subworkflows |
+| `modules/` | Individual process modules |
+| `examples/datasets.tsv` | Example input file |
+| `examples/RESUME` | Example run script |
+
+## Usage
+
+```bash
+nextflow run main.nf --datasets <datasets.tsv> [OPTIONS]
+```
+
+### Parameters
+
+| Parameter | Description | Default |
+|---|---|---|
+| `--datasets` | Path to a TSV file with dataset and sample IDs | required |
+| `--outdir` | Directory to save results | `results` |
+| `--default_specie` | Species to assign when metadata is missing or unknown (`human` or `mouse`). Samples without a resolved species are skipped by STARsolo. | `null` |
+| `--no_infer_specie` | Skip reading species from metadata; assign `--default_specie` to all samples. Requires `--default_specie`. | `false` |
+| `--metaonly` | Only fetch metadata — skip downloading and alignment | `false` |
+| `--help` | Print help message and exit | — |
+
+### Input file format
+
+The `--datasets` TSV must have a header row with two columns:
+
+```tsv
+dataset_id	sample_id
+GSE230685	GSM7232572,GSM7232573
+E-MTAB-9221	ERS4689152,ERS4689153
+PRJEB37166	ERS4605100,ERS4605101
+```
+
+- `dataset_id` — GEO series (`GSE*`), BioProject (`PRJEB*`/`PRJNA*`), or ArrayExpress accession (`E-MTAB-*`)
+- `sample_id` — comma-separated list of sample accessions belonging to that dataset
+
+See [examples/datasets.tsv](examples/datasets.tsv) for a full example.
+
+## Quick example
+
+```bash
+nextflow run main.nf \
+  --datasets examples/datasets.tsv \
+  --outdir results \
+  --default_specie human \
+  -resume
+```
+
+## Output structure
+
+```
+results/
+├── raw/
+│   └── <dataset_id>/
+│       ├── fastq/
+│       │   └── <sample_id>/        FASTQs (R1, R2, I1)
+│       ├── bam/
+│       │   └── <sample_id>/        10x BAM files
+│       └── sra/
+│           └── <sample_id>/        SRA files
+├── starsolo/
+│   └── <dataset_id>/               STARsolo count matrices and QC stats
+├── metadata/
+│   └── <dataset_id>/               Metadata files (links, parsed TSVs, SOFT, etc.)
+├── index/
+│   ├── fastq.csv                   Index of all published FASTQs
+│   ├── bam.csv                     Index of all published BAMs
+│   ├── sra.csv                     Index of all published SRA files
+│   └── starsolo.csv                Index of all STARsolo outputs
+├── versions.yml                    Software versions used by each process
+└── mapping_qc_stats.tsv            Per-sample STARsolo mapping QC statistics
+```
+
+## Species handling
+
+By default (`--no_infer_specie` not set), species is read from sample metadata. If it is blank or unrecognised:
+
+- If `--default_specie` is set, that species is used and a warning is logged.
+- If `--default_specie` is not set, the sample is assigned `UNKNOWN` and skipped by STARsolo.
+
+Use `--no_infer_specie` to bypass metadata entirely and force all samples to `--default_specie`.
+
+## Requirements
+
+- Nextflow `>=26.04.1`
+- Singularity (or Docker for local runs)
+- LSF cluster (or adjust `nextflow.config` executor for local use)
