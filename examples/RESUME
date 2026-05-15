@@ -2,11 +2,11 @@
 
 set -euo pipefail
 
-samplefile="/path/to/sample.list"
+datasets="/path/to/datasets.tsv"
 
-[[ -e "$samplefile" ]] || (echo "File "$samplefile" not found" && false)
+[[ -e "$datasets" ]] || (echo "File $datasets not found" && false)
 
-nextflow run cellgeni/nf-reprocessing-public-10x \
-  --samplefile $samplefile \
-  --ansi-log false \
-  -resume
+nextflow run main.nf \
+    --datasets "$datasets" \
+    --outdir "results" \
+    -resume
