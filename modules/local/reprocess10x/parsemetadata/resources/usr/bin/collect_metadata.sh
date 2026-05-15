@@ -35,6 +35,19 @@ function parse_geo_family() {
 
   ## get bioproject ID
   grep Series_relation ${SERIES}_family.soft | perl -ne 'print "$1\n" if (m/(PRJ[A-Z]+\d+)/)' | sort | uniq  > $SERIES.project.list
+
+  if [[ ! -s $SERIES.project.list ]]
+  then
+    >&2 echo "WARNING: No project ID found in ${SERIES}_family.soft file! Trying e-utils method..."
+    GEOID=$(curl -g --retry 5 --retry-delay 1 --fail --silent \
+    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=gds&term=${SERIES}[ACCN]+GSE[ETYP]&retmode=json" \
+    | jq -r ".esearchresult.idlist[0] // empty" 2>/dev/null)
+
+    curl -g --retry 5 --retry-delay 1 --fail --silent \
+      "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=gds&id=$GEOID&retmode=json" \
+      | jq -r ".result.\"$GEOID\".bioproject // empty" 2>/dev/null \
+      | grep PRJ > $SERIES.project.list
+  fi
   
   ## get sample IDs; samples here are GSM IDs; usually for a 10x GSM==SRS==SRX, but I haven't checked *all* of the SRA you know 
   awk '
@@ -55,7 +68,7 @@ function parse_geo_family() {
   cut -f 4 ${SERIES}.sample.relation.list > $SERIES.biosample.list
 
   ## first variable is used to spot dbGap and other problematic datasets;
-  local EXPIDS=`grep Series_relation ${SERIES}_family.soft | grep -v PRJ | wc -l` 
+  local EXPIDS=`grep Series_relation ${SERIES}_family.soft | grep -v PRJ | wc -l`
   
   ## few sanity checks:
   if [[ `cat $SERIES.project.list | wc -l` -gt 1 ]]
@@ -187,17 +200,17 @@ function get_sample_ids() {
       ## try to get sample, experiment, and run IDs from metadata file using GSM
       if [[ `grep $i $META` ]]
       then
-        SMPS=`grep $i $META | tr '\t' '\n' | grep -P "^[SE]RS\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
-        EXPS=`grep $i $META | tr '\t' '\n' | grep -P "^[SE]RX\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
-        RUNS=`grep $i $META | tr '\t' '\n' | grep -P "^[SE]RR\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
+        SMPS=`grep $i $META | tr '\t' '\n' | grep -P "^[SED]RS\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
+        EXPS=`grep $i $META | tr '\t' '\n' | grep -P "^[SED]RX\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
+        RUNS=`grep $i $META | tr '\t' '\n' | grep -P "^[SED]RR\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
         write_accessions $SERIES $i $SMPS $EXPS $RUNS
         STATUS=$?
       ## try to get sample, experiment, and run IDs from metadata file using BioSample
       elif [[ `grep $biosample $META` ]]
       then
-        SMPS=`grep $biosample $META | tr '\t' '\n' | grep -P "^[SE]RS\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
-        EXPS=`grep $biosample $META | tr '\t' '\n' | grep -P "^[SE]RX\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
-        RUNS=`grep $biosample $META | tr '\t' '\n' | grep -P "^[SE]RR\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
+        SMPS=`grep $biosample $META | tr '\t' '\n' | grep -P "^[SED]RS\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
+        EXPS=`grep $biosample $META | tr '\t' '\n' | grep -P "^[SED]RX\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
+        RUNS=`grep $biosample $META | tr '\t' '\n' | grep -P "^[SED]RR\d+$" | sort | uniq | tr '\n' ',' | sed "s/,$//"`
         write_accessions $SERIES $i $SMPS $EXPS $RUNS
         STATUS=$?
       else
@@ -317,7 +330,7 @@ function make_util_files() {
     parse_ena_metadata.sh $SERIES > $SERIES.parsed.tsv
   elif [[ -s "$SERIES.sra.tsv" ]]
   then
-    subset_meta $SERIES.ena.tsv $SUBSET
+    subset_meta $SERIES.sra.tsv $SUBSET
     parse_sra_metadata.sh $SERIES > $SERIES.parsed.tsv
   else
     >&2 echo "ERROR: No metadata file found for $SERIES!"
@@ -448,7 +461,7 @@ function process_bioproject {
   fi
 
   ## create sample list
-  cat $SERIES.ena.tsv | tr '\t' '\n' | grep -P "^[SE]RS\d+$" | sort | uniq > $SERIES.sample.list 
+  cat $SERIES.ena.tsv | tr '\t' '\n' | grep -P "^[SED]RS\d+$" | sort | uniq > $SERIES.sample.list 
 
   ## make utility files
   make_util_files $SERIES $SUBSET
