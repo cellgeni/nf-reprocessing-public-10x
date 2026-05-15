@@ -1,4 +1,3 @@
-include { REPROCESS10X_PARSEMETADATA } from '../../../modules/local/reprocess10x/parsemetadata'
 include { REPROCESS10X_LOADDATA } from '../../../modules/local/reprocess10x/loaddata'
 include { REPROCESS10X_BAM2FASTQ } from '../../../modules/local/reprocess10x/bam2fastq'
 include { REPROCESS10X_SRA2FASTQ } from '../../../modules/local/reprocess10x/sra2fastq'
@@ -6,15 +5,18 @@ include { REPROCESS10X_SRA2FASTQ } from '../../../modules/local/reprocess10x/sra
 workflow DOWNLOAD10X {
 
     take:
-    datasets     // channel: [ val(meta), [ sample_ids ] ]
+    links     // channel: [ val(meta), path("links.tsv") ]
     wl_basedir   // channel: [ dirpath ] a path to whitelist base directory (see https://github.com/cellgeni/nf-reprocessing-public-10x/tree/main/data/whitelists/)
     
     main:
-    // STEP 1: Parse metadata for each dataset
-    REPROCESS10X_PARSEMETADATA(datasets)
+    // STEP 0: Initialize channels
+    sras     = channel.empty()
+    bams     = channel.empty()
+    versions = channel.empty()
 
+    // STEP 1: Load data from links
     // Get links for each run file from metadata
-    links = REPROCESS10X_PARSEMETADATA.out.links
+    collected_links = links
         // Read links file and split by tab
         .splitCsv(sep: '\t', strip: true)
         // Group by sample to count number of runs per sample
@@ -38,22 +40,20 @@ workflow DOWNLOAD10X {
         //.view { meta, url -> "LINKS: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], url=$url (${url.getClass().simpleName})" }
                                           
 
-      
-    // STEP 2: Load data from links
-    REPROCESS10X_LOADDATA(links)
+    REPROCESS10X_LOADDATA(collected_links)
 
     //REPROCESS10X_LOADDATA.out.fastq.view { meta, fastq -> "FASTQ: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastq=$fastq (${fastq.getClass().simpleName})" }
     //REPROCESS10X_LOADDATA.out.sra.view { meta, sra -> "SRA: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], sra=$sra (${sra.getClass().simpleName})" }
     //REPROCESS10X_LOADDATA.out.bam.view { meta, bam -> "BAM: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], bam=$bam (${bam.getClass().simpleName})" }
 
-    // // STEP 3: Convert loaded data to fastq if needed
+    // STEP 2: Convert loaded data to fastq if needed
     REPROCESS10X_BAM2FASTQ(REPROCESS10X_LOADDATA.out.bam)
     REPROCESS10X_SRA2FASTQ(REPROCESS10X_LOADDATA.out.sra, wl_basedir)
 
-    // STEP 4: Collect all outputs
+    // STEP 3 Collect all outputs
     // Combine all fastq channels and group by sample
     fastqs = REPROCESS10X_LOADDATA.out.fastq
-        // Combine fastq files for each run as they were loaded separately
+        // Combine fastq files for each read as they were loaded separately
         //.view { meta, fastq -> "FASTQ LOADED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastq=$fastq (${fastq.getClass().simpleName})" }
         .groupTuple(size: 2, sort: 'hash', remainder: true)
         //.view { meta, fastqs -> "FASTQ GROUPED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
@@ -76,20 +76,9 @@ workflow DOWNLOAD10X {
         // Combine a list of fastq files
         .map { groupkey, fastqlist -> tuple( groupkey.getGroupTarget(), fastqlist.flatten() ) }
         //.view { meta, fastqs -> "FASTQ FINAL: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
-    
-    // Collect metadata files per dataset
-    metadata = REPROCESS10X_PARSEMETADATA.out.links
-        .mix(
-            REPROCESS10X_PARSEMETADATA.out.list,
-            REPROCESS10X_PARSEMETADATA.out.tsv,
-            REPROCESS10X_PARSEMETADATA.out.txt,
-            REPROCESS10X_PARSEMETADATA.out.soft
-        )
-        .groupTuple(sort: 'hash')
-        .map { meta, files -> tuple( meta, files.flatten() ) }
-    
+
     // Collect versions
-    versions = REPROCESS10X_PARSEMETADATA.out.versions.first()
+    versions = versions
         .mix(
             REPROCESS10X_LOADDATA.out.versions.first(),
             REPROCESS10X_BAM2FASTQ.out.versions.first(),
@@ -98,6 +87,7 @@ workflow DOWNLOAD10X {
 
     emit:
     fastq    = fastqs
-    metadata = metadata
+    bam      = bams.mix(REPROCESS10X_LOADDATA.out.bam)
+    sra      = sras.mix(REPROCESS10X_LOADDATA.out.sra)
     versions = versions
 }
