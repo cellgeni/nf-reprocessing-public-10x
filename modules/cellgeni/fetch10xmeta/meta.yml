@@ -23,11 +23,10 @@ input:
       Map with dataset-level metadata. Must contain key 'id' with the dataset accession.
       Supported prefixes: GSE* (GEO), E-MTAB* (ArrayExpress), PRJ* (BioProject/ENA).
   - name: sample_ids
-    type: list or string
+    type: string
     description: >
-      Sample accession IDs to restrict processing to (e.g. GSM*, ERS*, DRS*).
-      Accepts a list (['DRS408305', 'DRS408306']) or a comma-separated string
-      ('DRS408305,DRS408306'). If empty or null, all samples in the dataset are used.
+      Comma-separated sample accession IDs to restrict processing to (e.g. 'GSM7232572,GSM7232573',
+      'DRS408305,DRS408306'). If empty or null, all samples in the dataset are used.
 output:
 - - name: meta
     type: map

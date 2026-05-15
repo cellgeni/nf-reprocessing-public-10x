@@ -17,7 +17,7 @@ For GEO datasets the module falls back through project IDs → sub-series projec
 | Name | Type | Description |
 |---|---|---|
 | `meta.id` | string | Dataset accession. Supported prefixes: `GSE*` (GEO), `E-MTAB*` (ArrayExpress), `PRJ*` (BioProject). |
-| `sample_ids` | list or string | Sample accessions to restrict processing to (e.g. `GSM*`, `ERS*`, `DRS*`). Accepts a list or comma-separated string. Pass empty/null to process all samples in the dataset. |
+| `sample_ids` | string | Comma-separated sample accessions to restrict processing to (e.g. `GSM7232572,GSM7232573`, `ERS4689152,ERS4689153`). Pass empty/null to process all samples in the dataset. |
 
 ## Outputs
 
@@ -33,16 +33,11 @@ For GEO datasets the module falls back through project IDs → sub-series projec
 ## Usage
 
 ```nextflow
-include { FETCH10XMETA } from './modules/cellgeni/fetch10xmeta'
+include { FETCH10XMETA } from 'cellgeni/fetch10xmeta'
 
-// With a list of sample IDs
+// GEO dataset with comma-separated sample IDs
 FETCH10XMETA(
-    channel.of([[id: 'GSE230685'], ['GSM7232572', 'GSM7232573']])
-)
-
-// With a comma-separated string (e.g. from a params file or TSV)
-FETCH10XMETA(
-    channel.of([[id: 'PRJDB14428'], 'DRS408305,DRS408306'])
+    channel.of([[id: 'GSE230685'], 'GSM7232572,GSM7232573'])
 )
 
 // All samples in an ArrayExpress dataset (no sample ID filter)
