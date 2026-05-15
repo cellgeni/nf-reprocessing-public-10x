@@ -7,7 +7,7 @@ def helpMessage() {
     =============================
     Reprocess Public 10X Datasets
     =============================
-    This pipeline performs loading and processing of public datasets stored on GEO, SRA, ENA or ArrayExpress.
+    This pipeline loads and reprocesses public 10x datasets from GEO, SRA, ENA, or ArrayExpress.
 
     Usage: nextflow run main.nf [OPTIONS]
 
@@ -15,17 +15,20 @@ def helpMessage() {
         --datasets          Path to a TSV file with dataset and sample IDs.
 
     Optional:
-        --specie            Species to use for all samples: 'human', 'mouse', or 'auto' (default: auto).
-                            'auto' reads species from metadata; falls back to --default_specie if unknown.
-        --default_specie    Fallback species when metadata is missing or unknown (e.g. "human" or "mouse").
-        --output_dir        Directory to save results (default: results).
+        --outdir            Directory to save results (default: results).
+        --default_specie    Species to assign to samples when metadata is missing or unknown.
+                            Accepted values: 'human', 'mouse'. If not set, such samples are skipped
+                            by STARsolo with a warning.
+        --no_infer_specie   Do not read species from metadata; assign --default_specie to all samples.
+                            Requires --default_specie.
+        --metaonly          Only fetch metadata, skip downloading and alignment (default: false).
         --help              Show this help message and exit.
 
     Example:
         nextflow run main.nf \\
-          -profile standard \\
           --datasets examples/datasets.tsv \\
-          --output_dir results \\
+          --outdir results \\
+          --default_specie human \\
           -resume
 
     == datasets.tsv format ==
@@ -33,6 +36,21 @@ def helpMessage() {
     GSE230685	GSM7232572,GSM7232573
     E-MTAB-9221	ERS4689152,ERS4689153
     PRJEB37166	ERS4605100,ERS4605101
+    ==========================
+
+    == Output structure ==
+    results/
+      raw/<dataset_id>/fastq/<sample_id>/   FASTQs
+      raw/<dataset_id>/bam/<sample_id>/     10x BAM files
+      raw/<dataset_id>/sra/<sample_id>/     SRA files
+      starsolo/<dataset_id>/                STARsolo count matrices and QC stats
+      metadata/<dataset_id>/                Metadata files (links, parsed TSVs, SOFT, etc.)
+      index/fastq.csv                       Index of all published FASTQs
+      index/bam.csv                         Index of all published BAMs
+      index/sra.csv                         Index of all published SRA files
+      index/starsolo.csv                    Index of all STARsolo outputs
+      versions.yml                          Software versions
+      mapping_qc_stats.tsv                  Per-sample STARsolo mapping QC statistics
     ==========================
     """.stripIndent()
 }
@@ -126,7 +144,7 @@ workflow {
 output {
     metadata {
         label "metadata"
-        path { meta, files -> "metadata/${meta.id}" }
+        path { meta, _files -> "metadata/${meta.id}" }
     }
     bam {
         label "bam"
