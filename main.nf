@@ -77,7 +77,7 @@ workflow {
         System.exit(params.help ? 0 : 1)
     }
 
-    if (!(params.metaonly instanceof Boolean)) {
+    if (!(params.metaonly instanceof Boolean) && !(params.metaonly.toString().toLowerCase() in ['true', 'false'])) {
         log.error("Invalid value for --metaonly: ${params.metaonly}. Expected a boolean (true/false).")
         System.exit(1)
     }
