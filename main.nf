@@ -77,7 +77,7 @@ workflow {
         System.exit(params.help ? 0 : 1)
     }
 
-    if (!(params.metaonly instanceof Boolean)) {
+    if (!(params.metaonly instanceof Boolean) && !(params.metaonly.toString().toLowerCase() in ['true', 'false'])) {
         log.error("Invalid value for --metaonly: ${params.metaonly}. Expected a boolean (true/false).")
         System.exit(1)
     }
@@ -99,8 +99,8 @@ workflow {
     mouse_reference = params.mouse_reference ? channel.value( tuple( [id: "mouse"], file( params.mouse_reference, checkIfExists: true )) ) : channel.empty()
 
     // Define variables
-    def metaonlyflag    = params.metaonly ? true : false
-    def no_infer_specie = params.no_infer_specie ? false : true
+    def metaonlyflag    = params.metaonly && params.metaonly.toString().toLowerCase() == 'true' ? true : false
+    def no_infer_specie = params.no_infer_specie && params.no_infer_specie.toString().toLowerCase() == 'true' ? true : false
     def defaultspecie   = params.default_specie
 
     // Run main workflow
