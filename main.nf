@@ -100,7 +100,7 @@ workflow {
 
     // Define variables
     def metaonlyflag    = params.metaonly ? true : false
-    def no_infer_specie = params.no_infer_specie ? false : true
+    def no_infer_specie = params.no_infer_specie ? true : false
     def defaultspecie   = params.default_specie
 
     // Run main workflow
