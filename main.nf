@@ -99,8 +99,8 @@ workflow {
     mouse_reference = params.mouse_reference ? channel.value( tuple( [id: "mouse"], file( params.mouse_reference, checkIfExists: true )) ) : channel.empty()
 
     // Define variables
-    def metaonlyflag    = params.metaonly ? true : false
-    def no_infer_specie = params.no_infer_specie ? true : false
+    def metaonlyflag    = params.metaonly && params.metaonly.toString().toLowerCase() == 'true' ? true : false
+    def no_infer_specie = params.no_infer_specie && params.no_infer_specie.toString().toLowerCase() == 'true' ? true : false
     def defaultspecie   = params.default_specie
 
     // Run main workflow
