@@ -100,6 +100,7 @@ workflow {
 
     // Define variables
     def metaonlyflag    = params.metaonly && params.metaonly.toString().toLowerCase() == 'true' ? true : false
+    def rawonlyflag     = params.rawonly && params.rawonly.toString().toLowerCase() == 'true' ? true : false
     def no_infer_specie = params.no_infer_specie && params.no_infer_specie.toString().toLowerCase() == 'true' ? true : false
     def defaultspecie   = params.default_specie
 
@@ -111,7 +112,8 @@ workflow {
         mouse_reference,
         metaonlyflag,
         no_infer_specie,
-        defaultspecie
+        defaultspecie,
+        rawonlyflag
     )
 
     // Collect versions

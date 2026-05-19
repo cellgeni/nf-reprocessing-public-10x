@@ -13,6 +13,7 @@ workflow REPROCESS10X {
     metaonlyflag     // channel: [ val(metaonlyflag) ] a flag to indicate whether to only fetch metadata without downloading data or running STARsolo (e.g. for testing or debugging)
     no_infer_specie  // channel: [ val(no_infer_specie) ] a flag to indicate whether to infer specie from metadata or not; if true, all samples will be assigned the default_specie (or 'UNKNOWN' if default_specie is not set)
     default_specie   // channel: [ val(default_specie) ] the default specie to assign to samples with unknown species in metadata; if not set, 'UNKNOWN' will be used as default specie
+    rawonlyflag      // channel: [ val(rawonlyflag) ] a flag to indicate whether to only download raw data (fastq files) without running STARsolo; if true, STARsolo steps will be skipped
 
     main:
     // STEP 0.1: Init channels
@@ -51,17 +52,14 @@ workflow REPROCESS10X {
     
     versions = versions.mix(FETCH10XMETA.out.versions)
 
+    // STEP 2: Download datasets
     if (!metaonlyflag) {
-        // STEP 2: Download datasets
         DOWNLOAD10X(
             FETCH10XMETA.out.links,
             wl_basedir
         )
 
-        // STEP2: Run STARsolo on fastq files for human and mouse samples
-        // Resolve effective specie for each sample:
-        //   --specie human/mouse  → override all samples to that specie
-        //   --specie auto         → use meta.specie from metadata; fall back to --default_specie if blank/NULL/UNKNOWN
+        // Collect fastq files per sample
         def unknown_values = [null, '', 'NULL', 'UNKNOWN']
         def specie_map = [
             human: 'Homo sapiens',
@@ -98,16 +96,20 @@ workflow REPROCESS10X {
                 log.warn "Sample ${meta.id} (${meta.dataset_id}) has unexpected species '${meta.specie}' — skipping STARsolo"
                 [meta, _fastqs]
             }
-
         
+        // Collect channels
+        bams     = bams.mix(DOWNLOAD10X.out.bam)
+        sras     = sras.mix(DOWNLOAD10X.out.sra)
+        versions = versions.mix(DOWNLOAD10X.out.versions)
+    }
+
+    // STEP 3: Run STARsolo
+    if (!metaonlyflag && !rawonlyflag) {
         // Run STARsolo on fastq files for human and mouse samples
         STARSOLO10X_HUMAN(fastqs.human, human_reference, wl_basedir)
         STARSOLO10X_MOUSE(fastqs.mouse, mouse_reference, wl_basedir)
 
-        // STEP 3: Collect outputs        
-        // Collect channels
-        bams     = bams.mix(DOWNLOAD10X.out.bam)
-        sras     = sras.mix(DOWNLOAD10X.out.sra)
+        // Collect outputs
         starsolo = starsolo.mix(
             STARSOLO10X_HUMAN.out.mapping,
             STARSOLO10X_MOUSE.out.mapping
@@ -118,7 +120,6 @@ workflow REPROCESS10X {
         )
         versions = versions
             .mix(
-                DOWNLOAD10X.out.versions,
                 STARSOLO10X_HUMAN.out.versions,
                 STARSOLO10X_MOUSE.out.versions
             )
