@@ -78,8 +78,8 @@ output:
     type: "file"
     description: "YAML file recording the pipeline version used by this process."
 authors:
-  - "@aljes"
+  - "@claptar"
 maintainers:
-  - "@aljes"
+  - "@claptar"
 version: "0.0.4"
 license: "MIT"
