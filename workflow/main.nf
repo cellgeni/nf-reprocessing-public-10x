@@ -1,8 +1,8 @@
 // IMPORT SUBWORKFLOW
 include { DOWNLOAD10X } from '../subworkflows/local/download10x/'
 include { FETCH10XMETA } from 'cellgeni/fetch10xmeta'
-include { STARSOLO10X as STARSOLO10X_HUMAN } from 'cellgeni/starsolo10x'
-include { STARSOLO10X as STARSOLO10X_MOUSE } from 'cellgeni/starsolo10x'
+include { STARSOLO10X as STARSOLO10X_HUMAN } from '../subworkflows/local/starsolo10x/'
+include { STARSOLO10X as STARSOLO10X_MOUSE } from '../subworkflows/local/starsolo10x/'
 
 workflow REPROCESS10X {
     take:
@@ -106,8 +106,8 @@ workflow REPROCESS10X {
     // STEP 3: Run STARsolo
     if (!metaonlyflag && !rawonlyflag) {
         // Run STARsolo on fastq files for human and mouse samples
-        STARSOLO10X_HUMAN(fastqs.human, human_reference, wl_basedir)
-        STARSOLO10X_MOUSE(fastqs.mouse, mouse_reference, wl_basedir)
+        STARSOLO10X_HUMAN(fastqs.human, human_reference)
+        STARSOLO10X_MOUSE(fastqs.mouse, mouse_reference)
 
         // Collect outputs
         starsolo = starsolo.mix(
