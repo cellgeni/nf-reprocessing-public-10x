@@ -1,0 +1,60 @@
+---
+name: "cellgeni/starsolo10x"
+description: >
+  Aligns 10x single-cell RNA-seq FASTQs to a reference genome using STARsolo,
+  producing per-sample output directories with count matrices and summary statistics.
+keywords:
+  - STARsolo
+  - STAR
+  - alignment
+  - single-cell
+  - 10x
+  - RNA-seq
+  - count matrix
+tools:
+  - starsolo:
+      description: "Wrapper around STAR aligner configured for 10x Chromium single-cell data."
+      homepage: "https://github.com/cellgeni/STARsolo"
+      licence:
+        - "MIT"
+  - STAR:
+      description: "RNA-seq aligner"
+      homepage: "https://github.com/alexdobin/STAR"
+      licence:
+        - "MIT"
+input:
+- - meta:
+      type: "map"
+      description: "Map with sample-level metadata. Must contain key 'id' with the sample accession.\ne.g. [ id:'SRR12345678' ]\n"
+  - fastqs:
+      type: "file"
+      description: "FASTQ files (gzipped) for the sample. Staged under fastqs/."
+      pattern: "*.gz"
+- - ref_meta:
+      type: "map"
+      description: "Map with reference metadata. Must contain key 'id' with the species/reference name.\ne.g. [ id:'homo_sapiens' ]\n"
+  - reference:
+      type: "directory"
+      description: "STAR genome index directory."
+- - whitelists:
+      type: "directory"
+      description: "Directory containing 10x barcode whitelist files."
+output:
+  mapping:
+  - - meta:
+        type: "map"
+        description: "Map with sample-level metadata, passed through from input.\ne.g. [ id:'SRR12345678' ]\n"
+    - "${meta.id}":
+        type: "directory"
+        description: "STARsolo output directory for the sample, containing count matrices and alignment summaries."
+        pattern: "${meta.id}"
+  versions:
+  - path: "versions.yml"
+    type: "file"
+    description: "YAML file recording the STAR and STARsolo wrapper versions used by this process."
+authors:
+  - "@claptar"
+maintainers:
+  - "@claptar"
+version: "0.0.1"
+license: "MIT"
