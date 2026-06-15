@@ -326,11 +326,27 @@ function make_util_files() {
   ## simultaneously, '$SERIES.urls.list' is generated listing all things that need to be downloaded 
   if [[ -s "$SERIES.ena.tsv" ]]
   then
-    subset_meta $SERIES.ena.tsv $SUBSET
+    if grep -q -f $SUBSET $SERIES.ena.tsv;
+    then
+      subset_meta $SERIES.ena.tsv $SUBSET
+    elif [[ -s "$SERIES.biosample.list" ]];
+    then
+      subset_meta $SERIES.ena.tsv $SERIES.biosample.list
+    else
+      >&2 echo "WARNING: No subset file provided, and no biosample list found; using the full metadata file $SERIES.ena.tsv"
+    fi
     parse_ena_metadata.sh $SERIES > $SERIES.parsed.tsv
   elif [[ -s "$SERIES.sra.tsv" ]]
   then
-    subset_meta $SERIES.sra.tsv $SUBSET
+    if grep -q -f $SUBSET $SERIES.sra.tsv;
+    then
+      subset_meta $SERIES.sra.tsv $SUBSET
+    elif [[ -s "$SERIES.biosample.list" ]];
+    then
+      subset_meta $SERIES.sra.tsv $SERIES.biosample.list
+    else
+      >&2 echo "WARNING: No subset file provided, and no biosample list found; using the full metadata file $SERIES.sra.tsv"
+    fi
     parse_sra_metadata.sh $SERIES > $SERIES.parsed.tsv
   else
     >&2 echo "ERROR: No metadata file found for $SERIES!"
