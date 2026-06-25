@@ -1,6 +1,7 @@
 include { REPROCESS10X_LOADDATA } from '../../../modules/local/reprocess10x/loaddata'
 include { REPROCESS10X_BAM2FASTQ } from '../../../modules/local/reprocess10x/bam2fastq'
-include { REPROCESS10X_SRA2FASTQ } from '../../../modules/local/reprocess10x/sra2fastq'
+include { SRA2FASTQ } from '../../../modules/cellgeni/sra2fastq'
+include { RENAME10XRUN } from '../../../modules/cellgeni/rename10xrun'
 
 workflow DOWNLOAD10X {
 
@@ -51,23 +52,23 @@ workflow DOWNLOAD10X {
     REPROCESS10X_BAM2FASTQ(bams)
     
     sras = sras.mix(REPROCESS10X_LOADDATA.out.sra)
-    REPROCESS10X_SRA2FASTQ(sras, wl_basedir)
+    SRA2FASTQ(sras)
 
-    // STEP 3 Collect all outputs
-    // Combine all fastq channels and group by sample
-    fastqs = REPROCESS10X_LOADDATA.out.fastq
+    // STEP 3: Rename fastq files to match 10x run naming convention
+    fastqs2rename = REPROCESS10X_LOADDATA.out.fastq
         // Combine fastq files for each read as they were loaded separately
-        //.view { meta, fastq ->
-        //    def m = (meta instanceof nextflow.extension.GroupKey) ? meta.getGroupTarget() : meta
-        //    "FASTQ LOADED: meta=[${m.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastq=$fastq (${fastq.getClass().simpleName})"
-        //}
         .groupTuple(sort: 'hash', remainder: true)
-        //.view { meta, fastqs -> "FASTQ GROUPED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
-        // Combine fastq files from BAM and SRA conversion
-        .mix(
-            REPROCESS10X_BAM2FASTQ.out.fastq,
-            REPROCESS10X_SRA2FASTQ.out.fastq
-        )
+        .mix(SRA2FASTQ.out.fastq)
+
+    RENAME10XRUN(
+        fastqs2rename,
+        wl_basedir
+    )
+
+    // STEP 4 Collect all outputs
+    // Combine all fastq channels and group by sample
+    fastqs = RENAME10XRUN.out.reads
+        .mix(REPROCESS10X_BAM2FASTQ.out.fastq)
         //.view { meta, fastqs -> "FASTQ MIXED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Leave only sample id and dataset id in metadata
         .map { run_meta, fastq ->
@@ -88,7 +89,8 @@ workflow DOWNLOAD10X {
         .mix(
             REPROCESS10X_LOADDATA.out.versions.first(),
             REPROCESS10X_BAM2FASTQ.out.versions.first(),
-            REPROCESS10X_SRA2FASTQ.out.versions.first()
+            RENAME10XRUN.out.versions.first(),
+            SRA2FASTQ.out.versions.first()
         )
 
     emit:
