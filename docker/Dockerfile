@@ -12,7 +12,7 @@ ARG pfq_version=0.6.7
 #Install OS packages
 RUN apt-get update && apt-get -y --no-install-recommends -qq install \
     wget gcc build-essential software-properties-common libz-dev \
-    git libncurses5-dev libbz2-dev liblzma-dev default-jre bsdmainutils pbzip2 pigz
+    git libncurses5-dev libbz2-dev liblzma-dev default-jre bsdmainutils pbzip2 pigz python3
 
 #Install STAR
 RUN wget --no-check-certificate https://github.com/alexdobin/STAR/archive/${star_version}.tar.gz && \
@@ -60,6 +60,5 @@ RUN echo "STAR version: ${star_version}" >> versions.txt && \
     echo "samtools version: ${samtools_version}" >> versions.txt && \
     echo "SRA-tools version: ${sratools_version}" >> versions.txt && \
     echo "bamtofastq version: ${bamtofastq_version}" >> versions.txt && \
-    echo "seqtk version: ${seqtk_version}" >> versions.txt && \ 
-    echo "Parallel fastq-dump version: ${pfq_version}" >> versions.txt 
-
+    echo "seqtk version: ${seqtk_version}" >> versions.txt && \
+    echo "Parallel fastq-dump version: ${pfq_version}" >> versions.txt

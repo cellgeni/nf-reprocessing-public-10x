@@ -1,6 +1,7 @@
 include { REPROCESS10X_LOADDATA } from '../../../modules/local/reprocess10x/loaddata'
 include { REPROCESS10X_BAM2FASTQ } from '../../../modules/local/reprocess10x/bam2fastq'
 include { REPROCESS10X_SRA2FASTQ } from '../../../modules/local/reprocess10x/sra2fastq'
+include { REPROCESS10X_RENAMEFASTQ } from '../../../modules/local/reprocess10x/renamefastq'
 
 workflow DOWNLOAD10X {
 
@@ -38,13 +39,9 @@ workflow DOWNLOAD10X {
             return urls.collect { url -> [groupKey(run_meta, urls.size()), url] }
         }
         //.view { meta, url -> "LINKS: meta=[${meta.getGroupTarget().collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], url=$url (${url.getClass().simpleName}), count=${meta.getGroupSize()}" }
-                                          
+                                           
 
     REPROCESS10X_LOADDATA(collected_links)
-
-    //REPROCESS10X_LOADDATA.out.fastq.view { meta, fastq -> "FASTQ: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastq=$fastq (${fastq.getClass().simpleName})" }
-    //REPROCESS10X_LOADDATA.out.sra.view { meta, sra -> "SRA: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], sra=$sra (${sra.getClass().simpleName})" }
-    //REPROCESS10X_LOADDATA.out.bam.view { meta, bam -> "BAM: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], bam=$bam (${bam.getClass().simpleName})" }
 
     // STEP 2: Convert loaded data to fastq if needed
     bams = bams.mix(REPROCESS10X_LOADDATA.out.bam)
@@ -57,42 +54,38 @@ workflow DOWNLOAD10X {
     // Combine all fastq channels and group by sample
     fastqs = REPROCESS10X_LOADDATA.out.fastq
         // Combine fastq files for each read as they were loaded separately
-        //.view { meta, fastq ->
-        //    def m = (meta instanceof nextflow.extension.GroupKey) ? meta.getGroupTarget() : meta
-        //    "FASTQ LOADED: meta=[${m.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastq=$fastq (${fastq.getClass().simpleName})"
-        //}
         .groupTuple(sort: 'hash', remainder: true)
-        //.view { meta, fastqs -> "FASTQ GROUPED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Combine fastq files from BAM and SRA conversion
         .mix(
             REPROCESS10X_BAM2FASTQ.out.fastq,
             REPROCESS10X_SRA2FASTQ.out.fastq
         )
-        //.view { meta, fastqs -> "FASTQ MIXED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Leave only sample id and dataset id in metadata
         .map { run_meta, fastq ->
             def sample_meta = [id: run_meta.sample_id.getGroupTarget(), dataset_id: run_meta.dataset_id, specie: run_meta.specie]
             def run_count = run_meta.sample_id.getGroupSize()
             tuple( groupKey(sample_meta, run_count), fastq )
         }
-        //.view { groupkey, fastqs -> "FASTQ PRE-GROUPED: groupkey=$groupkey (${groupkey.getClass().simpleName}), fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Group by sample id and dataset id
         .groupTuple(sort: 'hash', remainder: true)
-        //.view { groupkey, fastqs -> "FASTQ GROUPED 2: groupkey=$groupkey (${groupkey.getClass().simpleName}), fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Combine a list of fastq files
         .map { groupkey, fastqlist -> tuple( groupkey.getGroupTarget(), fastqlist.flatten() ) }
-        //.view { meta, fastqs -> "FASTQ FINAL: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
+
+    REPROCESS10X_RENAMEFASTQ(fastqs, wl_basedir)
 
     // Collect versions
     versions = versions
         .mix(
             REPROCESS10X_LOADDATA.out.versions.first(),
             REPROCESS10X_BAM2FASTQ.out.versions.first(),
-            REPROCESS10X_SRA2FASTQ.out.versions.first()
+            REPROCESS10X_SRA2FASTQ.out.versions.first(),
+            REPROCESS10X_RENAMEFASTQ.out.versions.first()
         )
 
     emit:
-    fastq    = fastqs
+    fastq    = REPROCESS10X_RENAMEFASTQ.out.fastq
+    fastq_inference_report  = REPROCESS10X_RENAMEFASTQ.out.report
+    fastq_inference_summary = REPROCESS10X_RENAMEFASTQ.out.summary
     bam      = bams
     sra      = sras
     versions = versions
