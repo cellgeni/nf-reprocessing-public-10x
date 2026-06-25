@@ -25,7 +25,7 @@ process SRA2FASTQ {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         parallel-fastq-dump: \$(grep "fastq-dump" /versions.txt | cut -d ':' -f 2)
-        pigz: \$(pigz --version | head -n 1 | cut -d ' ' -f 2)
+        pigz: \$(pigz --version 2>&1 | head -n 1 | cut -d ' ' -f 2)
     END_VERSIONS
     """
 
@@ -37,7 +37,7 @@ process SRA2FASTQ {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         parallel-fastq-dump: \$(grep "fastq-dump" /versions.txt | cut -d ':' -f 2)
-        pigz: \$(pigz --version | head -n 1 | cut -d ' ' -f 2)
+        pigz: \$(pigz --version 2>&1 | head -n 1 | cut -d ' ' -f 2)
     END_VERSIONS
     """
 }
