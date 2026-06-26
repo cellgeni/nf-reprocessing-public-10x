@@ -2,6 +2,7 @@ include { REPROCESS10X_LOADDATA } from '../../../modules/local/reprocess10x/load
 include { REPROCESS10X_BAM2FASTQ } from '../../../modules/local/reprocess10x/bam2fastq'
 include { SRA2FASTQ } from '../../../modules/cellgeni/sra2fastq'
 include { RENAME10XRUN } from '../../../modules/cellgeni/rename10xrun'
+include { RENAME10XSAMPLE } from '../../../modules/cellgeni/rename10xsample'
 
 workflow DOWNLOAD10X {
 
@@ -65,10 +66,23 @@ workflow DOWNLOAD10X {
         wl_basedir
     )
 
+    sample2rename = RENAME10XRUN.out.reads
+        .map { run_meta, fastq ->
+            def sample_meta = [id: run_meta.sample_id.getGroupTarget(), dataset_id: run_meta.dataset_id, specie: run_meta.specie]
+            def run_count = run_meta.sample_id.getGroupSize()
+            tuple( groupKey(sample_meta, run_count), fastq )
+        }
+        .groupTuple(sort: 'hash', remainder: true)
+        .map { run_meta, fastqlist -> tuple( run_meta.getGroupTarget(), fastqlist.flatten() ) }
+    RENAME10XSAMPLE(
+        sample2rename
+        )
+
+
+
     // STEP 4 Collect all outputs
     // Combine all fastq channels and group by sample
-    fastqs = RENAME10XRUN.out.reads
-        .mix(REPROCESS10X_BAM2FASTQ.out.fastq)
+    fastqs = REPROCESS10X_BAM2FASTQ.out.fastq
         //.view { meta, fastqs -> "FASTQ MIXED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Leave only sample id and dataset id in metadata
         .map { run_meta, fastq ->
@@ -82,6 +96,7 @@ workflow DOWNLOAD10X {
         //.view { groupkey, fastqs -> "FASTQ GROUPED 2: groupkey=$groupkey (${groupkey.getClass().simpleName}), fastqs=$fastqs (${fastqs.getClass().simpleName})" }
         // Combine a list of fastq files
         .map { groupkey, fastqlist -> tuple( groupkey.getGroupTarget(), fastqlist.flatten() ) }
+        .mix(RENAME10XSAMPLE.out.reads)
         //.view { meta, fastqs -> "FASTQ FINAL: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
 
     // Collect versions
@@ -90,12 +105,15 @@ workflow DOWNLOAD10X {
             REPROCESS10X_LOADDATA.out.versions.first(),
             REPROCESS10X_BAM2FASTQ.out.versions.first(),
             RENAME10XRUN.out.versions.first(),
+            RENAME10XSAMPLE.out.versions.first(),
             SRA2FASTQ.out.versions.first()
         )
 
     emit:
-    fastq    = fastqs
-    bam      = bams
-    sra      = sras
-    versions = versions
+    original_fastq = fastqs2rename.mix(REPROCESS10X_BAM2FASTQ.out.fastq)
+    runs           = RENAME10XRUN.out.reads.mix(REPROCESS10X_BAM2FASTQ.out.fastq)
+    fastq          = fastqs
+    bam            = bams
+    sra            = sras
+    versions       = versions
 }
