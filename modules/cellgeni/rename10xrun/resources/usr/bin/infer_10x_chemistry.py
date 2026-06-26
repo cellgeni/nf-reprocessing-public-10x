@@ -1,114 +1,224 @@
 #!/usr/bin/env python3
-# =============================================================================
-# infer_10x_chemistry.py
-# -----------------------------------------------------------------------------
-# Infer the 10x Genomics chemistry of a set of FASTQ files by matching reads
-# against barcode whitelists, identify the role of each read file (R1 barcode,
-# R2 cDNA, I1/I2 sample index, and -- for 3' v1 -- the separate UMI read),
-# run a battery of validation checks, and rename the files to the Cell Ranger
-# naming convention so they can be fed to Cell Ranger or STARsolo.
-#
-#   [Sample]_S1_L00[Lane]_[R1|R2|I1|I2]_001.fastq.gz
-#
-# Design goal: be correct rather than clever. The barcode read is found by
-# *whitelist content*, never by length alone, so the tool is robust to
-# over-sequenced R1, swapped mates, and mislabelled files. See the companion
-# docs/10x_read_geometry.md for the full geometry reference and check list.
-#
-# This is a single-mate-set tool: one invocation handles one sample / one lane
-# (i.e. one SRR / one GSM / one SRS-ERS, matching the reprocessing pipeline's
-# "one 10x run per sample" assumption). For multi-lane data, run once per lane.
-# =============================================================================
+"""
+Infer 10x FASTQ read roles and normalize filenames for Cell Ranger/STARsolo.
+
+This tool is intentionally conservative. It emits Cell Ranger-style FASTQs only
+when barcode whitelist evidence and read-length geometry identify a unique 10x
+layout. Ambiguous or mixed-modality inputs fail closed unless --prefer-gex is
+used to select the GEX library from a mixed Multiome sample. ATAC-only inputs
+are identified but are not emitted unless --allow-atac-output is explicit.
+"""
 
 from __future__ import annotations
 
 import argparse
 import bz2
+import collections
 import gzip
 import json
 import os
-import random
 import re
 import shutil
 import sys
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
+DNA_RE = re.compile(r"^[ACGTNacgtn]+$")
+LANE_RE = re.compile(r"(?:^|[_\-.])L00([1-8])(?:[_\-.]|$)")
+READ_RE = re.compile(r"(?:^|[_\-.])(R1|R2|R3|I1|I2|_1|_2|_3|1|2|3)(?:[_\-.]|$)", re.IGNORECASE)
+SAMPLE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
-# ---------------------------------------------------------------------------
-# Chemistry reference table
-# ---------------------------------------------------------------------------
-# cb_prefix_len is how many bp of the barcode read we test against the
-# whitelist (== cell-barcode length). strand is the STARsolo --soloStrand
-# default; "Unknown" means it must be resolved downstream (the 3'v2 / 5'
-# ambiguity). split_cb_umi is True only for the original 3' v1 layout.
 
 @dataclass(frozen=True)
-class Chemistry:
-    key: str
+class WhitelistDef:
+    id: str
     label: str
-    whitelist: str
     cb_len: int
-    umi_len: int
-    cb_prefix_len: int
-    strand: str
-    generation: str
-    split_cb_umi: bool = False
-    notes: str = ""
+    filenames: Tuple[str, ...]
+    modality: str
+    umi_len: Optional[int] = None
+    usable_for_starsolo: bool = True
 
 
-# 3' v1 was shipped with two UMI lengths over its lifetime: the common 10 bp
-# UMI and an early 5 bp UMI used by some datasets (e.g. SRR10759480). The UMI
-# read is therefore MEASURED at run time, not assumed -- nominal umi_len below
-# is just the common case. See cellgeni/reprocess_public_10x#17.
-V1_UMI_LENS = (5, 10)
+WHITELISTS: Tuple[WhitelistDef, ...] = (
+    WhitelistDef(
+        id="10x_3p_v1",
+        label="Chromium Single Cell 3prime v1",
+        cb_len=14,
+        filenames=("737K-april-2014_rc.txt", "737K-april-2014_rc.txt.gz"),
+        modality="gex",
+        umi_len=None,
+    ),
+    WhitelistDef(
+        id="10x_3p_v2_or_5p_v1_v2",
+        label="Chromium 3prime v2 or 5prime v1/v2",
+        cb_len=16,
+        filenames=("737K-august-2016.txt", "737K-august-2016.txt.gz"),
+        modality="gex",
+        umi_len=10,
+    ),
+    WhitelistDef(
+        id="10x_3p_v3_family",
+        label="Chromium 3prime v3/v3.1/LT/HT",
+        cb_len=16,
+        filenames=("3M-february-2018.txt", "3M-february-2018.txt.gz"),
+        modality="gex",
+        umi_len=12,
+    ),
+    WhitelistDef(
+        id="10x_3p_v4_gemx",
+        label="GEM-X Universal 3prime v4",
+        cb_len=16,
+        filenames=("3M-3pgex-may-2023.txt", "3M-3pgex-may-2023.txt.gz"),
+        modality="gex",
+        umi_len=12,
+    ),
+    WhitelistDef(
+        id="10x_5p_v3_gemx",
+        label="GEM-X Universal 5prime v3",
+        cb_len=16,
+        filenames=("3M-5pgex-jan-2023.txt", "3M-5pgex-jan-2023.txt.gz"),
+        modality="gex",
+        umi_len=12,
+    ),
+    WhitelistDef(
+        id="10x_multiome_arc_gex",
+        label="Chromium Single Cell Multiome Gene Expression",
+        cb_len=16,
+        filenames=(
+            "gex_737K-arc-v1.txt",
+            "gex_737K-arc-v1.txt.gz",
+            "737K-arc-v1.txt",
+            "737K-arc-v1.txt.gz",
+        ),
+        modality="gex",
+        umi_len=12,
+    ),
+    WhitelistDef(
+        id="10x_multiome_arc_atac",
+        label="Chromium Single Cell Multiome ATAC",
+        cb_len=16,
+        filenames=(
+            "atac_737K-arc-v1.txt",
+            "atac_737K-arc-v1.txt.gz",
+            "737K-arc-v1.txt",
+            "737K-arc-v1.txt.gz",
+        ),
+        modality="atac",
+        usable_for_starsolo=False,
+    ),
+    WhitelistDef(
+        id="10x_atac_v1_v1.1_v2",
+        label="Chromium Single Cell ATAC v1/v1.1/v2",
+        cb_len=16,
+        filenames=("737K-cratac-v1.txt", "737K-cratac-v1.txt.gz"),
+        modality="atac",
+        usable_for_starsolo=False,
+    ),
+)
 
-CHEMISTRIES: list[Chemistry] = [
-    Chemistry("3pv1", "3' v1", "737K-april-2014_rc.txt", 14, 10, 14,
-              "Forward", "GemCode / Chromium v1", split_cb_umi=True,
-              notes="CB (14bp) and UMI (5 or 10bp) sequenced as SEPARATE "
-                    "reads; R1 is reconstructed as CB+UMI and the UMI length "
-                    "is measured from the data."),
-    Chemistry("3pv2_or_5p", "3' v2  or  5' v1/v2", "737K-august-2016.txt", 16, 10, 16,
-              "Unknown", "v2 / 5' v1-v2",
-              notes="Whitelist shared by 3' v2 and 5' v1/v2. Renaming is "
-                    "identical for both; resolve 3' vs 5' (strand) downstream."),
-    Chemistry("3pv3", "3' v3 / v3.1", "3M-february-2018.txt", 16, 12, 16,
-              "Forward", "v3 / v3.1"),
-    Chemistry("3pv4", "3' v4 (GEM-X)", "3M-3pgex-may-2023.txt", 16, 12, 16,
-              "Forward", "GEM-X 3'"),
-    Chemistry("5pv3", "5' v3 (GEM-X)", "3M-5pgex-jan-2023.txt", 16, 12, 16,
-              "Reverse", "GEM-X 5'"),
-    Chemistry("multiome", "Multiome GEX (ARC v1)", "737K-arc-v1.txt", 16, 12, 16,
-              "Forward", "Multiome ARC v1"),
-]
-CHEM_BY_KEY = {c.key: c for c in CHEMISTRIES}
+
+@dataclass
+class MatchResult:
+    whitelist_id: str
+    label: str
+    modality: str
+    cb_len: int
+    umi_len: Optional[int]
+    offset: int
+    hits: int
+    sampled: int
+    fraction: float
 
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
+@dataclass
+class FastqStats:
+    path: str
+    basename: str
+    sampled_records: int
+    length_counts: Dict[int, int]
+    common_length: int
+    common_fraction: float
+    min_length: int
+    max_length: int
+    existing_read_type: Optional[str] = None
+    existing_lane: Optional[str] = None
+    matches: List[MatchResult] = field(default_factory=list)
 
-def log(level: str, msg: str) -> None:
-    sys.stderr.write(f"[{level:<5}] {msg}\n")
+    def to_json(self) -> Dict[str, object]:
+        data = asdict(self)
+        data["length_counts"] = {str(k): v for k, v in sorted(self.length_counts.items())}
+        return data
 
 
-def info(msg): log("INFO", msg)
-def warn(msg): log("WARN", msg)
-def err(msg):  log("ERROR", msg)
+@dataclass
+class OutputEntry:
+    read_type: str
+    lane: str
+    output_name: str
+    sources: List[str]
+    synthetic: bool = False
+    umi_len: Optional[int] = None
 
 
-class DetectionError(Exception):
-    """Raised on a hard validation failure (the tool should exit non-zero)."""
+@dataclass
+class InferencePlan:
+    sample: str
+    chemistry_id: str
+    chemistry_label: str
+    modality: str
+    usable_for_starsolo: bool
+    confidence: str
+    warnings: List[str]
+    entries: List[OutputEntry]
+    excluded_files: List[str]
+    stats: List[FastqStats]
+    checks: Dict[str, object] = field(default_factory=dict)
 
 
-# ---------------------------------------------------------------------------
-# Compression helpers (detect by magic bytes, not by extension)
-# ---------------------------------------------------------------------------
+class TenxInferenceError(RuntimeError):
+    pass
 
-def compression_of(path: str) -> str:
-    with open(path, "rb") as fh:
-        magic = fh.read(3)
+
+class WhitelistStore:
+    def __init__(self, whitelist_dir: Path):
+        self.whitelist_dir = whitelist_dir
+        self._sets: Dict[str, Optional[set[str]]] = {}
+        self._paths: Dict[str, Optional[Path]] = {}
+        for spec in WHITELISTS:
+            self._paths[spec.id] = self._find_file(spec)
+
+    def _find_file(self, spec: WhitelistDef) -> Optional[Path]:
+        for name in spec.filenames:
+            p = self.whitelist_dir / name
+            if p.exists():
+                return p
+        return None
+
+    def available_specs(self) -> List[WhitelistDef]:
+        return [spec for spec in WHITELISTS if self._paths.get(spec.id) is not None]
+
+    def get(self, spec: WhitelistDef) -> Optional[set[str]]:
+        if spec.id in self._sets:
+            return self._sets[spec.id]
+        path = self._paths.get(spec.id)
+        if path is None:
+            self._sets[spec.id] = None
+            return None
+        values: set[str] = set()
+        with open_text_auto(path) as handle:
+            for line in handle:
+                bc = line.strip().split()[0] if line.strip() else ""
+                if len(bc) >= spec.cb_len:
+                    values.add(bc[: spec.cb_len].upper())
+        self._sets[spec.id] = values
+        return values
+
+
+def compression_of(path: Path) -> str:
+    with open(path, "rb") as handle:
+        magic = handle.read(3)
     if magic[:2] == b"\x1f\x8b":
         return "gz"
     if magic[:3] == b"BZh":
@@ -116,16 +226,16 @@ def compression_of(path: str) -> str:
     return "none"
 
 
-def open_text(path: str):
+def open_text_auto(path: Path):
     comp = compression_of(path)
     if comp == "gz":
-        return gzip.open(path, "rt")
+        return gzip.open(path, "rt", encoding="utf-8", errors="replace")
     if comp == "bz2":
-        return bz2.open(path, "rt")
-    return open(path, "rt")
+        return bz2.open(path, "rt", encoding="utf-8", errors="replace")
+    return open(path, "rt", encoding="utf-8", errors="replace")
 
 
-def open_binary(path: str):
+def open_bytes_auto(path: Path):
     comp = compression_of(path)
     if comp == "gz":
         return gzip.open(path, "rb")
@@ -134,665 +244,799 @@ def open_binary(path: str):
     return open(path, "rb")
 
 
-# ---------------------------------------------------------------------------
-# FASTQ sampling and read-level stats
-# ---------------------------------------------------------------------------
-
-@dataclass
-class FastqInfo:
-    path: str
-    compression: str
-    n_seen: int                 # reads scanned
-    median_len: int             # typical read length (from the sample)
-    min_len: int
-    max_len: int
-    distinct_len: int           # number of distinct lengths seen in the sample
-    prefix14: list[str] = field(default_factory=list)
-    prefix16: list[str] = field(default_factory=list)
-    # filled in later:
-    role: Optional[str] = None
-    wl_match: dict[str, float] = field(default_factory=dict)
-
-
-def sample_fastq(path: str, n_sample: int, n_scan: int, seed: int = 100) -> FastqInfo:
-    """Reservoir-sample up to n_sample reads from the first n_scan reads.
-
-    Stats (length median/min/max, distinct lengths) are computed from the
-    reservoir, which is a uniform sample of the scanned reads. We cap the scan
-    at n_scan to bound runtime on very large files; the first ~2M reads are
-    plenty representative for chemistry detection.
-    """
-    rng = random.Random(seed)
-    res: list[str] = []
-    n_seen = 0
-    with open_text(path) as fh:
+def iter_fastq_records(path: Path) -> Iterator[Tuple[str, str, str, str]]:
+    with open_text_auto(path) as handle:
+        recno = 0
         while True:
-            h = fh.readline()
+            h = handle.readline()
             if not h:
                 break
-            seq = fh.readline()
-            fh.readline()          # plus line
-            qual = fh.readline()
-            if not qual:
-                break              # truncated final record
-            seq = seq.rstrip("\n")
-            n_seen += 1
-            if len(res) < n_sample:
-                res.append(seq)
-            else:
-                j = rng.randint(0, n_seen - 1)
-                if j < n_sample:
-                    res[j] = seq
-            if n_scan and n_seen >= n_scan:
+            s = handle.readline()
+            p = handle.readline()
+            q = handle.readline()
+            recno += 1
+            if not (s and p and q):
+                raise TenxInferenceError(f"{path}: truncated FASTQ record at record {recno}")
+            if not h.startswith("@"):
+                raise TenxInferenceError(f"{path}: FASTQ header at record {recno} does not start with @")
+            if not p.startswith("+"):
+                raise TenxInferenceError(f"{path}: FASTQ plus line at record {recno} does not start with +")
+            seq = s.rstrip("\r\n")
+            qual = q.rstrip("\r\n")
+            if len(seq) != len(qual):
+                raise TenxInferenceError(f"{path}: sequence/quality length mismatch at record {recno}")
+            if not DNA_RE.match(seq):
+                raise TenxInferenceError(f"{path}: non-DNA sequence characters at record {recno}")
+            yield h.rstrip("\r\n"), seq, p.rstrip("\r\n"), qual
+
+
+def normalized_read_id(header: str) -> str:
+    x = header[1:] if header.startswith("@") else header
+    x = x.split()[0]
+    x = re.sub(r"([/.][123])$", "", x)
+    return x
+
+
+def natural_key(path: str) -> Tuple[object, ...]:
+    parts = re.split(r"(\d+)", Path(path).name)
+    return tuple(int(p) if p.isdigit() else p.lower() for p in parts)
+
+
+def parse_existing_read_type(name: str) -> Optional[str]:
+    # Prefer explicit Cell Ranger-style read tokens. R3 is common in public
+    # Multiome/ATAC exports where source R2 is the barcode index and source R3
+    # is the second genomic read that must become Cell Ranger R2.
+    m = re.search(r"(?:^|[_\-.])(R1|R2|R3|I1|I2)(?:[_\-.]|$)", name, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    # Common SRA dump suffixes: _1/_2/_3. Treat as hints only.
+    m = re.search(r"(?:^|[_\-.])([123])(?:\.f(?:ast)?q(?:\.gz|\.bz2)?|\.fq(?:\.gz|\.bz2)?|[_\-.]|$)", name, re.IGNORECASE)
+    if m:
+        return "R" + m.group(1)
+    return None
+
+
+def parse_lane(name: str) -> Optional[str]:
+    m = LANE_RE.search(name)
+    if not m:
+        return None
+    return "L00" + m.group(1)
+
+
+def collect_stats(paths: Sequence[Path], sample_records: int) -> List[FastqStats]:
+    stats: List[FastqStats] = []
+    for path in paths:
+        counts: collections.Counter[int] = collections.Counter()
+        n = 0
+        for _h, seq, _p, _q in iter_fastq_records(path):
+            counts[len(seq)] += 1
+            n += 1
+            if n >= sample_records:
                 break
+        if n == 0:
+            raise TenxInferenceError(f"{path}: no FASTQ records sampled")
+        common_length, common_n = counts.most_common(1)[0]
+        stats.append(
+            FastqStats(
+                path=str(path),
+                basename=path.name,
+                sampled_records=n,
+                length_counts=dict(counts),
+                common_length=common_length,
+                common_fraction=common_n / n,
+                min_length=min(counts),
+                max_length=max(counts),
+                existing_read_type=parse_existing_read_type(path.name),
+                existing_lane=parse_lane(path.name),
+            )
+        )
+    return stats
 
-    if not res:
-        raise DetectionError(f"No reads found in {path}")
 
-    lengths = sorted(len(s) for s in res)
-    median_len = lengths[len(lengths) // 2]
-    return FastqInfo(
-        path=path,
-        compression=compression_of(path),
-        n_seen=n_seen,
-        median_len=median_len,
-        min_len=lengths[0],
-        max_len=lengths[-1],
-        distinct_len=len(set(lengths)),
-        prefix14=[s[:14] for s in res],
-        prefix16=[s[:16] for s in res],
+def sample_sequences(path: Path, limit: int) -> List[str]:
+    seqs: List[str] = []
+    for _h, seq, _p, _q in iter_fastq_records(path):
+        seqs.append(seq.upper())
+        if len(seqs) >= limit:
+            break
+    return seqs
+
+
+def match_whitelists(stats: List[FastqStats], wl_store: WhitelistStore, args: argparse.Namespace) -> None:
+    available = wl_store.available_specs()
+    missing = [spec for spec in WHITELISTS if wl_store._paths.get(spec.id) is None]
+    if missing and not args.allow_missing_whitelists:
+        # Missing RNA/GEX whitelists make exact chemistry inference incomplete and
+        # are fatal. Missing ATAC-only whitelists are reported but not fatal because
+        # Multiome ATAC is also detected using the shared ARC whitelist and ATAC-like
+        # geometry is rejected rather than processed as GEX.
+        missing_required = [spec for spec in missing if spec.modality == "gex"]
+        detail = "; ".join(f"{spec.id}: one of {','.join(spec.filenames)}" for spec in missing)
+        if missing_required:
+            raise TenxInferenceError(
+                f"Missing required whitelist(s) under {wl_store.whitelist_dir}: {detail}. "
+                "Use --allow-missing-whitelists only for tests or explicitly limited deployments."
+            )
+        print(f"WARNING: Missing optional ATAC whitelist(s) under {wl_store.whitelist_dir}: {detail}", file=sys.stderr)
+    if not available:
+        raise TenxInferenceError(
+            f"No known whitelist files found under {wl_store.whitelist_dir}. Expected one of: "
+            + ", ".join(sorted({x for spec in WHITELISTS for x in spec.filenames}))
+        )
+    for st in stats:
+        seqs = sample_sequences(Path(st.path), args.sample_records)
+        for spec in available:
+            wl = wl_store.get(spec)
+            if not wl:
+                continue
+            offsets = [0]
+            # Multiome ATAC i5 can be 24 nt with an 8 nt dark/spacer segment. Try
+            # both offset 0 and offset 8 so the report is explicit about evidence.
+            if spec.modality == "atac" and st.common_length >= 24:
+                offsets = [0, 8]
+            for offset in offsets:
+                if st.common_length < offset + spec.cb_len:
+                    continue
+                hits = 0
+                for seq in seqs:
+                    if len(seq) >= offset + spec.cb_len and seq[offset : offset + spec.cb_len] in wl:
+                        hits += 1
+                frac = hits / max(1, len(seqs))
+                if hits >= args.min_whitelist_hits and frac >= args.min_whitelist_fraction:
+                    st.matches.append(
+                        MatchResult(
+                            whitelist_id=spec.id,
+                            label=spec.label,
+                            modality=spec.modality,
+                            cb_len=spec.cb_len,
+                            umi_len=spec.umi_len,
+                            offset=offset,
+                            hits=hits,
+                            sampled=len(seqs),
+                            fraction=frac,
+                        )
+                    )
+        st.matches.sort(key=lambda m: (m.fraction, m.hits), reverse=True)
+
+
+def best_match(st: FastqStats, modality: Optional[str] = None) -> Optional[MatchResult]:
+    matches = [m for m in st.matches if modality is None or m.modality == modality]
+    return matches[0] if matches else None
+
+
+def require_constant_length(st: FastqStats, role: str, min_fraction: float = 0.98) -> None:
+    if st.common_fraction < min_fraction:
+        raise TenxInferenceError(
+            f"{st.basename}: {role} has variable read lengths "
+            f"{st.length_counts}; this looks trimmed or mixed and is unsafe to rename"
+        )
+
+
+def is_index_like(st: FastqStats) -> bool:
+    return st.common_length in {6, 7, 8, 9, 10, 14, 16, 24} and st.common_fraction >= 0.95
+
+
+def is_short_rna_barcode(st: FastqStats, m: MatchResult) -> bool:
+    if m.whitelist_id == "10x_3p_v1":
+        # Either separate v1 CB read (14 nt) or already merged CB+UMI read.
+        return st.common_length in {14, 19, 24} or 18 <= st.common_length <= 26
+    expected = m.cb_len + (m.umi_len or 0)
+    return expected <= st.common_length <= max(expected + 4, 32)
+
+
+def classify_gex(stats: List[FastqStats], args: argparse.Namespace, allow_excluded: bool) -> InferencePlan:
+    warnings: List[str] = []
+    gex_candidates = [st for st in stats if has_gex_layout(st)]
+    if not gex_candidates:
+        raise TenxInferenceError("No GEX-compatible barcode read matched any 10x RNA whitelist")
+
+    # Pick a chemistry by the best matching whitelist. All barcode reads must be consistent.
+    candidates_by_id: Dict[str, List[FastqStats]] = collections.defaultdict(list)
+    for st in gex_candidates:
+        m = best_match(st, "gex")
+        if m is None:
+            continue
+        if has_gex_layout(st):
+            candidates_by_id[m.whitelist_id].append(st)
+    if not candidates_by_id:
+        raise TenxInferenceError("Whitelist matches were present but not on reads with RNA barcode geometry")
+
+    best_id = max(candidates_by_id, key=lambda k: sum(best_match(s, "gex").hits for s in candidates_by_id[k]))
+    r1_files = sorted(candidates_by_id[best_id], key=lambda st: natural_key(st.path))
+    first_match = best_match(r1_files[0], "gex")
+    assert first_match is not None
+
+    for st in r1_files:
+        m = best_match(st, "gex")
+        if m is None or m.whitelist_id != best_id:
+            raise TenxInferenceError("Inconsistent RNA barcode whitelist matches across candidate R1 files")
+        require_constant_length(st, "RNA barcode read")
+
+    # Known ambiguity that does not affect naming or STARsolo CB/UMI positions.
+    confidence = "unique"
+    if best_id == "10x_3p_v2_or_5p_v1_v2":
+        confidence = "layout_only"
+        warnings.append("737K-august-2016 cannot distinguish 3prime v2 from 5prime v1/v2 by FASTQ geometry alone")
+    if best_id == "10x_3p_v3_family":
+        confidence = "layout_only"
+        warnings.append("3prime v3, v3.1, LT and HT share the same whitelist/layout family")
+
+    remaining = [st for st in stats if st not in r1_files]
+    excluded: List[str] = []
+
+    # v1 can be delivered as separate CB, UMI and biological FASTQs.
+    if best_id == "10x_3p_v1" and all(st.common_length == 14 for st in r1_files):
+        return classify_v1_separate(stats, r1_files, first_match, args)
+
+    expected_len = first_match.cb_len + (first_match.umi_len or 0)
+    umi_len = first_match.umi_len
+    if best_id == "10x_3p_v1" and first_match.umi_len is None:
+        umi_len = r1_files[0].common_length - first_match.cb_len
+        if umi_len not in args.allow_v1_umi_lengths:
+            raise TenxInferenceError(
+                f"Inferred 3prime v1 merged CB+UMI length {r1_files[0].common_length} gives UMI length {umi_len}, "
+                f"not in allowed values {sorted(args.allow_v1_umi_lengths)}"
+            )
+    else:
+        too_short = [st.basename for st in r1_files if st.common_length < expected_len]
+        if too_short:
+            raise TenxInferenceError(f"RNA barcode reads shorter than CB+UMI ({expected_len}): {too_short}")
+        too_long = [st.basename for st in r1_files if expected_len < st.common_length < 50]
+        if too_long:
+            warnings.append(f"RNA barcode reads include bases beyond CB+UMI ({expected_len}): {too_long}")
+
+    # Biological reads. For standard single-end RNA layout, R2 is the only long read.
+    # For mixed Multiome, --prefer-gex selects the longer GEX R2 and excludes ATAC reads.
+    long_reads = [st for st in remaining if st.common_length >= args.min_bio_read_length]
+    if args.prefer_gex:
+        gex_long = [st for st in long_reads if st.common_length >= args.min_gex_r2_length]
+        if len(gex_long) >= len(r1_files):
+            excluded.extend([st.path for st in long_reads if st not in gex_long])
+            long_reads = gex_long
+    if len(long_reads) != len(r1_files):
+        raise TenxInferenceError(
+            f"Expected {len(r1_files)} GEX biological R2 FASTQ(s) for RNA layout, found {len(long_reads)}. "
+            "This is ambiguous or mixed modality. Use --prefer-gex only when a Multiome GEX library should be selected."
+        )
+    r2_files = sorted(long_reads, key=lambda st: natural_key(st.path))
+    for st in r2_files:
+        require_constant_length(st, "biological read", min_fraction=0.90)
+
+    used_paths = {st.path for st in (r1_files + r2_files)}
+    index_files = [st for st in stats if st.path not in used_paths and st.path not in excluded]
+    if args.prefer_gex and any(best_match(st, "atac") is not None for st in stats):
+        # Mixed Multiome input: keep the 10-cycle GEX indexes and exclude ATAC
+        # 8/16/24-cycle index reads so they cannot be passed to STARsolo with GEX.
+        gex_index_files = [st for st in index_files if st.common_length == 10]
+        excluded.extend([st.path for st in index_files if st not in gex_index_files])
+        index_files = gex_index_files
+    entries: List[OutputEntry] = []
+    lanes = assign_lanes({"R1": r1_files, "R2": r2_files})
+    for lane, r1, r2 in zip(lanes, r1_files, r2_files):
+        entries.append(OutputEntry("R1", lane, cellranger_name(args.sample, lane, "R1"), [r1.path], umi_len=umi_len))
+        entries.append(OutputEntry("R2", lane, cellranger_name(args.sample, lane, "R2"), [r2.path]))
+
+    add_index_entries(entries, index_files, args.sample, lanes, warnings)
+
+    if index_files and len(index_files) not in {0, len(r1_files), 2 * len(r1_files)}:
+        leftovers = [st.path for st in index_files]
+        if allow_excluded:
+            excluded.extend(leftovers)
+        else:
+            raise TenxInferenceError(f"Unpaired index-like files remain after RNA assignment: {leftovers}")
+
+    fail_if_unassigned(stats, entries, excluded, "RNA/GEX role assignment")
+
+    return InferencePlan(
+        sample=args.sample,
+        chemistry_id=best_id,
+        chemistry_label=first_match.label,
+        modality="gex",
+        usable_for_starsolo=True,
+        confidence=confidence,
+        warnings=warnings,
+        entries=entries,
+        excluded_files=excluded,
+        stats=stats,
     )
 
 
-def count_reads(path: str) -> int:
-    """Exact read count by counting newlines (4 lines per record)."""
-    n = 0
-    with open_binary(path) as fh:
-        while True:
-            chunk = fh.read(1 << 20)
-            if not chunk:
-                break
-            n += chunk.count(b"\n")
-    return n // 4
+def classify_v1_separate(
+    stats: List[FastqStats], cb_files: List[FastqStats], match: MatchResult, args: argparse.Namespace
+) -> InferencePlan:
+    warnings: List[str] = []
+    n = len(cb_files)
+    remaining = [st for st in stats if st not in cb_files]
+    umi_files = [st for st in remaining if st.common_length in args.allow_v1_umi_lengths and st.common_fraction >= 0.98]
+    bio_files = [st for st in remaining if st.common_length >= args.min_bio_read_length]
+    if len(umi_files) != n:
+        raise TenxInferenceError(
+            f"Detected 3prime v1 14 nt CB read(s), but found {len(umi_files)} UMI FASTQ(s); "
+            f"allowed UMI lengths are {sorted(args.allow_v1_umi_lengths)}"
+        )
+    if len(bio_files) != n:
+        raise TenxInferenceError(f"Detected 3prime v1 CB/UMI reads, but found {len(bio_files)} biological FASTQ(s)")
+    cb_files = sorted(cb_files, key=lambda st: natural_key(st.path))
+    umi_files = sorted(umi_files, key=lambda st: natural_key(st.path))
+    bio_files = sorted(bio_files, key=lambda st: natural_key(st.path))
+    umi_lengths = {st.common_length for st in umi_files}
+    if len(umi_lengths) != 1:
+        raise TenxInferenceError(f"3prime v1 UMI reads have inconsistent lengths: {sorted(umi_lengths)}")
+    umi_len = next(iter(umi_lengths))
+    if umi_len == 5:
+        warnings.append("3prime v1 UMI length is 5 nt; this is rare but explicitly allowed")
+    entries: List[OutputEntry] = []
+    lanes = assign_lanes({"CB": cb_files, "UMI": umi_files, "R2": bio_files})
+    for lane, cb, umi, bio in zip(lanes, cb_files, umi_files, bio_files):
+        entries.append(
+            OutputEntry(
+                "R1",
+                lane,
+                cellranger_name(args.sample, lane, "R1"),
+                [cb.path, umi.path],
+                synthetic=True,
+                umi_len=umi_len,
+            )
+        )
+        entries.append(OutputEntry("R2", lane, cellranger_name(args.sample, lane, "R2"), [bio.path]))
+    used_paths = {st.path for st in (cb_files + umi_files + bio_files)}
+    index_files = [st for st in stats if st.path not in used_paths]
+    add_index_entries(entries, index_files, args.sample, lanes, warnings)
+    fail_if_unassigned(stats, entries, [], "3prime v1 role assignment")
+    return InferencePlan(
+        sample=args.sample,
+        chemistry_id="10x_3p_v1",
+        chemistry_label="Chromium Single Cell 3prime v1",
+        modality="gex",
+        usable_for_starsolo=True,
+        confidence="unique",
+        warnings=warnings,
+        entries=entries,
+        excluded_files=[],
+        stats=stats,
+    )
 
 
-# ---------------------------------------------------------------------------
-# Whitelist loading and matching
-# ---------------------------------------------------------------------------
-
-def load_whitelist(path: str, k: int) -> set[str]:
-    """Load the first-k-bp prefix of each whitelist barcode into a set.
-
-    Robust to translation-style whitelists (e.g. 3M-5pgex-jan-2023): we take
-    the first whitespace-delimited field and its first k characters, which is
-    the cell barcode for all Cell Ranger whitelist files.
-    """
-    s: set[str] = set()
-    with open_text(path) as fh:
-        for line in fh:
-            tok = line.split()
-            if not tok:
-                continue
-            bc = tok[0]
-            if len(bc) >= k:
-                s.add(bc[:k])
-    return s
-
-
-def match_against(infos: list[FastqInfo], wl: set[str], k: int) -> dict[str, float]:
-    out: dict[str, float] = {}
-    for fi in infos:
-        pref = fi.prefix14 if k == 14 else fi.prefix16
-        if not pref:
-            out[fi.path] = 0.0
-            continue
-        # only count prefixes that are full length k (short reads -> not a match)
-        hits = sum(1 for p in pref if len(p) == k and p in wl)
-        out[fi.path] = hits / len(pref)
-    return out
-
-
-def detect_chemistry(infos: list[FastqInfo], wl_dir: str, min_frac: float):
-    """Return (chemistry, barcode_path). Populates fi.wl_match for every file.
-
-    Whitelists are loaded one at a time to keep peak memory ~ one whitelist
-    (the 3M files are ~3M lines).
-    """
-    present = []
-    for c in CHEMISTRIES:
-        wlpath = os.path.join(wl_dir, c.whitelist)
-        if os.path.exists(wlpath):
-            present.append((c, wlpath))
+def classify_atac(stats: List[FastqStats], args: argparse.Namespace) -> InferencePlan:
+    warnings: List[str] = []
+    i2_candidates = [st for st in stats if best_match(st, "atac") is not None and st.common_length in {16, 24}]
+    if not i2_candidates:
+        raise TenxInferenceError("No ATAC I2 barcode read matched a 10x ATAC/Multiome ATAC whitelist")
+    # Pick all I2 candidates with the same best whitelist as the strongest one.
+    strongest = max(i2_candidates, key=lambda st: best_match(st, "atac").hits)
+    strongest_match = best_match(strongest, "atac")
+    assert strongest_match is not None
+    i2_files = sorted(
+        [st for st in i2_candidates if best_match(st, "atac").whitelist_id == strongest_match.whitelist_id],
+        key=lambda st: natural_key(st.path),
+    )
+    for st in i2_files:
+        require_constant_length(st, "ATAC barcode index")
+    n = len(i2_files)
+    remaining = [st for st in stats if st not in i2_files]
+    long_reads = sorted([st for st in remaining if st.common_length >= args.min_atac_genomic_read_length], key=lambda st: natural_key(st.path))
+    if len(long_reads) != 2 * n:
+        raise TenxInferenceError(f"Expected {2*n} ATAC genomic read FASTQ(s), found {len(long_reads)}")
+    # Assign R1/R2. 50/49 is unique for Multiome ATAC. Equal-length ATAC needs existing read labels.
+    r1_files: List[FastqStats] = []
+    r2_files: List[FastqStats] = []
+    per_lane = [long_reads[i : i + 2] for i in range(0, len(long_reads), 2)]
+    for pair in per_lane:
+        explicit_r1 = [st for st in pair if st.existing_read_type == "R1"]
+        explicit_r2 = [st for st in pair if st.existing_read_type == "R2"]
+        explicit_r3 = [st for st in pair if st.existing_read_type == "R3"]
+        if len(explicit_r1) == 1 and len(explicit_r3) == 1:
+            # Public 10x ATAC/Multiome often appears as R1=genomic, R2=barcode, R3=genomic.
+            # The genomic R3 must be renamed to Cell Ranger R2.
+            r1_files.append(explicit_r1[0])
+            r2_files.append(explicit_r3[0])
+        elif len(explicit_r1) == 1 and len(explicit_r2) == 1:
+            r1_files.append(explicit_r1[0])
+            r2_files.append(explicit_r2[0])
         else:
-            warn(f"whitelist not found, skipping: {wlpath}")
-    if not present:
-        raise DetectionError(f"No whitelists found in {wl_dir}")
-
-    for c, wlpath in present:
-        wl = load_whitelist(wlpath, c.cb_prefix_len)
-        info(f"  loaded {c.whitelist} ({len(wl):,} barcodes)")
-        frac = match_against(infos, wl, c.cb_prefix_len)
-        for fi in infos:
-            fi.wl_match[c.key] = frac[fi.path]
-        del wl
-
-    # Collect strong matches across all (file, chemistry) pairs.
-    strong = [
-        (fi, ckey, f)
-        for fi in infos
-        for ckey, f in fi.wl_match.items()
-        if f >= min_frac
-    ]
-    if not strong:
-        best = max(
-            ((fi, ck, f) for fi in infos for ck, f in fi.wl_match.items()),
-            key=lambda t: t[2],
-        )
-        raise DetectionError(
-            "No read file matched any 10x whitelist above the threshold "
-            f"({min_frac:.0%}). Best was {os.path.basename(best[0].path)} "
-            f"vs {CHEM_BY_KEY[best[1]].label} at {best[2]:.1%}. "
-            "This is most likely not 10x single-cell data."
-        )
-
-    distinct_chems = {ckey for _, ckey, _ in strong}
-    if len(distinct_chems) > 1:
-        detail = ", ".join(
-            f"{os.path.basename(fi.path)}~{CHEM_BY_KEY[ck].label}={f:.0%}"
-            for fi, ck, f in strong
-        )
-        raise DetectionError(
-            f"Ambiguous chemistry: more than one whitelist matched strongly "
-            f"({detail}). Refusing to guess."
-        )
-
-    ckey = distinct_chems.pop()
-    chem = CHEM_BY_KEY[ckey]
-
-    barcode_hits = [(fi, f) for fi, ck, f in strong if ck == ckey]
-    if len(barcode_hits) > 1:
-        detail = ", ".join(f"{os.path.basename(fi.path)}={f:.0%}" for fi, f in barcode_hits)
-        raise DetectionError(
-            f"More than one file matched the {chem.label} whitelist "
-            f"({detail}). Cannot identify a unique barcode read."
-        )
-
-    barcode_fi = barcode_hits[0][0]
-    info(f"Detected chemistry: {chem.label}  "
-         f"(barcode read = {os.path.basename(barcode_fi.path)}, "
-         f"match = {barcode_hits[0][1]:.1%})")
-    return chem, barcode_fi
-
-
-# ---------------------------------------------------------------------------
-# Role assignment
-# ---------------------------------------------------------------------------
-
-_INDEX_HINT = re.compile(r"_(I[12])[._]")
-_READ_HINT = re.compile(r"_(R[123])[._]")
-
-
-def filename_index_hint(path: str) -> Optional[str]:
-    m = _INDEX_HINT.search(os.path.basename(path))
-    return m.group(1) if m else None
-
-
-@dataclass
-class Roles:
-    chem: Chemistry
-    barcode: FastqInfo                       # -> R1 (or CB part for v1)
-    cdna: FastqInfo                          # -> R2
-    umi: Optional[FastqInfo] = None          # v1 only -> merged into R1
-    index1: Optional[FastqInfo] = None       # -> I1
-    index2: Optional[FastqInfo] = None       # -> I2
-    index_order_confident: bool = True
-    effective_umi_len: int = 0
-    warnings: list[str] = field(default_factory=list)
-
-
-def assign_roles(infos: list[FastqInfo], chem: Chemistry, barcode_fi: FastqInfo,
-                 min_cdna: int, max_index: int) -> Roles:
-    others = [fi for fi in infos if fi is not barcode_fi]
-    roles = Roles(chem=chem, barcode=barcode_fi, cdna=None)  # type: ignore
-    barcode_fi.role = "R1"
-
-    umi_fi = None
-    if chem.split_cb_umi:
-        # 3' v1: the cell barcode (14 bp) and the UMI are sequenced as TWO
-        # separate reads, and the UMI is either 5 or 10 bp depending on the
-        # run -- some early v1 datasets use a 5 bp UMI (e.g. SRR10759480; see
-        # cellgeni/reprocess_public_10x#17). We MEASURE it, never assume 10.
-        #
-        # Set the long cDNA read aside first; the UMI is then the short read
-        # that remains. If a sample-index read is also present we may see two
-        # short reads, so choose the one nearest a valid v1 UMI length and,
-        # on a tie, the one that does NOT carry an I1/I2 filename hint.
-        shorts = [fi for fi in others if fi.median_len < min_cdna]
-        if not shorts:
-            raise DetectionError(
-                f"Detected a 3' v1 cell-barcode read but found no separate "
-                f"short UMI read (< {min_cdna} bp). The SRA dump probably did "
-                "not preserve the UMI read, so CB+UMI cannot be reconstructed."
-            )
-
-        def _umi_rank(fi: FastqInfo):
-            near = min(abs(fi.median_len - L) for L in V1_UMI_LENS)
-            has_index_hint = filename_index_hint(fi.path) is not None
-            return (near, has_index_hint, fi.median_len)
-
-        shorts.sort(key=_umi_rank)
-        umi_fi = shorts[0]
-        if len(shorts) > 1:
-            roles.warnings.append(
-                "More than one short read accompanies the v1 barcode read; "
-                f"chose {os.path.basename(umi_fi.path)} ({umi_fi.median_len} bp) "
-                "as the UMI by closeness to a valid v1 UMI length (5 or 10 bp). "
-                "If a sample-index read is also present, double-check this pick."
-            )
-        if min(abs(umi_fi.median_len - L) for L in V1_UMI_LENS) > 2:
-            roles.warnings.append(
-                f"v1 UMI read is {umi_fi.median_len} bp, which is not close to "
-                "either documented v1 UMI length (5 or 10 bp); proceeding with "
-                "the measured length, but please verify the file roles."
-            )
-        umi_fi.role = "UMI"
-        roles.umi = umi_fi
-        others = [fi for fi in others if fi is not umi_fi]
-        roles.effective_umi_len = umi_fi.median_len
-    else:
-        roles.effective_umi_len = chem.umi_len
-
-    # cDNA = longest remaining read that clears the cDNA length floor.
-    cdna_cands = sorted(others, key=lambda fi: fi.median_len, reverse=True)
-    cdna_fi = next((fi for fi in cdna_cands if fi.median_len >= min_cdna), None)
-    if cdna_fi is None:
-        longest = cdna_cands[0] if cdna_cands else None
-        extra = f" (longest was {longest.median_len} bp)" if longest else ""
-        raise DetectionError(
-            f"No cDNA (R2) read >= {min_cdna} bp found{extra}. "
-            "If this is multiome ATAC data it is out of scope for this module."
-        )
-    cdna_fi.role = "R2"
-    roles.cdna = cdna_fi
-    others = [fi for fi in others if fi is not cdna_fi]
-
-    # Remaining files: sample index reads (I1/I2), expected to be short.
-    index_fis = []
-    for fi in others:
-        if fi.median_len <= max_index:
-            index_fis.append(fi)
-        else:
-            roles.warnings.append(
-                f"Unexpected extra read {os.path.basename(fi.path)} "
-                f"({fi.median_len} bp) is neither cDNA nor a short index; ignoring."
-            )
-    if len(index_fis) > 2:
-        roles.warnings.append(
-            f"Found {len(index_fis)} candidate index reads; using the two shortest."
-        )
-        index_fis = sorted(index_fis, key=lambda fi: fi.median_len)[:2]
-
-    # Order I1/I2: trust an explicit filename hint, else fall back to encounter
-    # order and flag that we are not sure which is i7 vs i5.
-    if index_fis:
-        hinted = {filename_index_hint(fi.path): fi for fi in index_fis}
-        hinted.pop(None, None)
-        if "I1" in hinted or "I2" in hinted:
-            roles.index1 = hinted.get("I1")
-            roles.index2 = hinted.get("I2")
-            leftovers = [fi for fi in index_fis if fi not in (roles.index1, roles.index2)]
-            if roles.index1 is None and leftovers:
-                roles.index1 = leftovers.pop(0)
-            if roles.index2 is None and leftovers:
-                roles.index2 = leftovers.pop(0)
-        else:
-            roles.index1 = index_fis[0]
-            roles.index2 = index_fis[1] if len(index_fis) > 1 else None
-            if roles.index2 is not None:
-                roles.index_order_confident = False
-                roles.warnings.append(
-                    "Two index reads present but neither carries an I1/I2 "
-                    "filename hint; I1/I2 assignment is arbitrary. This does "
-                    "not affect STARsolo or Cell Ranger reprocessing."
+            by_len = sorted(pair, key=lambda st: st.common_length, reverse=True)
+            if by_len[0].common_length == by_len[1].common_length:
+                raise TenxInferenceError(
+                    "ATAC R1/R2 have equal length and no reliable R1/R2 labels; refusing to guess orientation"
                 )
-        for fi, lab in ((roles.index1, "I1"), (roles.index2, "I2")):
-            if fi is not None:
-                fi.role = lab
-
-    return roles
-
-
-# ---------------------------------------------------------------------------
-# Validation checks
-# ---------------------------------------------------------------------------
-
-def normalize_id(header: str) -> str:
-    x = header[1:] if header.startswith("@") else header
-    x = x.split()[0] if x.split() else x
-    return re.sub(r"[./][123]$", "", x)
-
-
-def first_ids(path: str, n: int) -> list[str]:
-    out = []
-    with open_text(path) as fh:
-        while len(out) < n:
-            h = fh.readline()
-            if not h:
-                break
-            fh.readline(); fh.readline(); fh.readline()
-            out.append(normalize_id(h.rstrip("\n")))
-    return out
+            r1_files.append(by_len[0])
+            r2_files.append(by_len[1])
+    used_paths = {st.path for st in (i2_files + r1_files + r2_files)}
+    index_files = [st for st in stats if st.path not in used_paths]
+    lanes = assign_lanes({"R1": r1_files, "R2": r2_files, "I2": i2_files})
+    entries: List[OutputEntry] = []
+    for lane, r1, r2, i2 in zip(lanes, r1_files, r2_files, i2_files):
+        entries.append(OutputEntry("R1", lane, cellranger_name(args.sample, lane, "R1"), [r1.path]))
+        entries.append(OutputEntry("R2", lane, cellranger_name(args.sample, lane, "R2"), [r2.path]))
+        entries.append(OutputEntry("I2", lane, cellranger_name(args.sample, lane, "I2"), [i2.path]))
+    add_index_entries(entries, index_files, args.sample, lanes, warnings, force_i1=True)
+    fail_if_unassigned(stats, entries, [], "ATAC role assignment")
+    return InferencePlan(
+        sample=args.sample,
+        chemistry_id=strongest_match.whitelist_id,
+        chemistry_label=strongest_match.label,
+        modality="atac",
+        usable_for_starsolo=False,
+        confidence="unique",
+        warnings=warnings,
+        entries=entries,
+        excluded_files=[],
+        stats=stats,
+    )
 
 
-def validate(roles: Roles, check_counts: bool, check_ids: bool) -> dict:
-    chem = roles.chem
-    report: dict[str, object] = {}
+def assign_lanes(role_files: Dict[str, List[FastqStats]]) -> List[str]:
+    counts = {role: len(files) for role, files in role_files.items()}
+    non_zero = {n for n in counts.values() if n != 0}
+    if len(non_zero) != 1:
+        raise TenxInferenceError(f"Read roles do not have matching lane counts: {counts}")
+    n = non_zero.pop()
+    lane_sets = []
+    for files in role_files.values():
+        if all(st.existing_lane for st in files):
+            lane_sets.append([st.existing_lane for st in files])
+    if lane_sets and all(set(x) == set(lane_sets[0]) for x in lane_sets):
+        return sorted(lane_sets[0])
+    return [f"L{i:03d}" for i in range(1, n + 1)]
 
-    # C2: barcode read long enough for CB (+UMI). Mirror cellgeni: shrink UMI
-    # if R1 is a little short; fatal only if it cannot hold the cell barcode.
-    if chem.split_cb_umi:
-        if roles.barcode.median_len < chem.cb_len:
-            raise DetectionError(
-                f"v1 CB read is {roles.barcode.median_len} bp, "
-                f"shorter than the {chem.cb_len} bp cell barcode.")
+
+def cellranger_name(sample: str, lane: str, read_type: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", sample).strip("_") or "sample"
+    return f"{safe}_S1_{lane}_{read_type}_001.fastq.gz"
+
+
+def add_index_entries(
+    entries: List[OutputEntry],
+    index_files: List[FastqStats],
+    sample: str,
+    lanes: List[str],
+    warnings: List[str],
+    force_i1: bool = False,
+) -> None:
+    if not index_files:
+        return
+    index_files = sorted(index_files, key=lambda st: natural_key(st.path))
+    n = len(lanes)
+    explicit_i1 = [st for st in index_files if st.existing_read_type == "I1"]
+    explicit_i2 = [st for st in index_files if st.existing_read_type == "I2"]
+    if force_i1:
+        candidates = explicit_i1 or index_files
+        if len(candidates) == n:
+            for lane, st in zip(lanes, candidates):
+                entries.append(OutputEntry("I1", lane, cellranger_name(sample, lane, "I1"), [st.path]))
+        elif candidates:
+            warnings.append(f"Could not assign ATAC I1 files unambiguously: {[st.basename for st in candidates]}")
+        return
+    if explicit_i1 and len(explicit_i1) == n:
+        for lane, st in zip(lanes, sorted(explicit_i1, key=lambda st: natural_key(st.path))):
+            entries.append(OutputEntry("I1", lane, cellranger_name(sample, lane, "I1"), [st.path]))
+    if explicit_i2 and len(explicit_i2) == n:
+        for lane, st in zip(lanes, sorted(explicit_i2, key=lambda st: natural_key(st.path))):
+            entries.append(OutputEntry("I2", lane, cellranger_name(sample, lane, "I2"), [st.path]))
+    assigned_paths = {st.path for st in (explicit_i1 + explicit_i2)}
+    leftover = [st for st in index_files if st.path not in assigned_paths and is_index_like(st)]
+    if not leftover:
+        return
+    if len(leftover) == n:
+        for lane, st in zip(lanes, leftover):
+            entries.append(OutputEntry("I1", lane, cellranger_name(sample, lane, "I1"), [st.path]))
+        warnings.append("Index read assigned as I1 from length/name order; STARsolo does not use index reads")
+    elif len(leftover) == 2 * n:
+        warnings.append("Dual index reads assigned as I1/I2 from sorted order because names lacked I1/I2 labels")
+        for i, lane in enumerate(lanes):
+            st1 = leftover[2 * i]
+            st2 = leftover[2 * i + 1]
+            entries.append(OutputEntry("I1", lane, cellranger_name(sample, lane, "I1"), [st1.path]))
+            entries.append(OutputEntry("I2", lane, cellranger_name(sample, lane, "I2"), [st2.path]))
     else:
-        bc_umi = chem.cb_len + chem.umi_len
-        r1 = roles.barcode.median_len
-        if r1 < chem.cb_len:
-            raise DetectionError(
-                f"Barcode read (R1) is {r1} bp, shorter than the "
-                f"{chem.cb_len} bp cell barcode.")
-        if r1 < bc_umi:
-            new_umi = r1 - chem.cb_len
-            warn(f"R1 ({r1} bp) < CB+UMI ({bc_umi} bp); "
-                 f"effective UMI length reduced to {new_umi}.")
-            roles.effective_umi_len = new_umi
-    report["C2_barcode_length_ok"] = True
-
-    # C3: barcode read should be (near) fixed length. A short, ragged R1 is the
-    # classic sign of a quality-trimmed barcode and is not safe to use.
-    if roles.barcode.distinct_len > 1 and roles.barcode.median_len <= 30:
-        raise DetectionError(
-            f"Barcode read has {roles.barcode.distinct_len} distinct lengths "
-            f"around {roles.barcode.median_len} bp; looks quality-trimmed.")
-    report["C3_barcode_fixed_length"] = roles.barcode.distinct_len == 1
-
-    # C4: cDNA length sanity (warn-level below 40, already fatal if absent).
-    if roles.cdna.median_len < 40:
-        warn(f"cDNA read (R2) is only {roles.cdna.median_len} bp; "
-             "transcriptome alignment rate may suffer.")
-    report["C4_cdna_length"] = roles.cdna.median_len
-
-    # C5: equal read counts across every mate that will be emitted.
-    if check_counts:
-        members = {"R1_src": roles.barcode, "R2": roles.cdna}
-        if roles.umi:
-            members["UMI"] = roles.umi
-        if roles.index1:
-            members["I1"] = roles.index1
-        if roles.index2:
-            members["I2"] = roles.index2
-        counts = {name: count_reads(fi.path) for name, fi in members.items()}
-        report["C5_read_counts"] = counts
-        uniq = set(counts.values())
-        if len(uniq) > 1:
-            raise DetectionError(f"Read counts differ across mates: {counts}")
-        info(f"Read count per mate: {next(iter(uniq)):,} (consistent)")
-    else:
-        report["C5_read_counts"] = "skipped"
-
-    # C8: light record-ID concordance check on the first reads.
-    if check_ids:
-        ref = first_ids(roles.barcode.path, 1000)
-        for name, fi in (("R2", roles.cdna),
-                         ("UMI", roles.umi),
-                         ("I1", roles.index1),
-                         ("I2", roles.index2)):
-            if fi is None:
-                continue
-            other = first_ids(fi.path, 1000)
-            n = min(len(ref), len(other))
-            mism = sum(1 for a, b in zip(ref[:n], other[:n]) if a != b)
-            if mism:
-                roles.warnings.append(
-                    f"{mism}/{n} record IDs differ between R1 and {name} "
-                    "in the first reads (could be a harmless ID-format "
-                    "difference, or the files may not be mates).")
-        report["C8_id_concordance_checked"] = True
-
-    return report
+        warnings.append(f"Unassigned index-like FASTQs: {[st.basename for st in leftover]}")
 
 
-# ---------------------------------------------------------------------------
-# Emitting renamed / reconstructed files
-# ---------------------------------------------------------------------------
+def has_gex_layout(st: FastqStats) -> bool:
+    m = best_match(st, "gex")
+    if m is None:
+        return False
+    return is_short_rna_barcode(st, m) or st.common_length >= 50
 
-def cr_name(sample: str, lane: int, read_type: str) -> str:
-    return f"{sample}_S1_L{lane:03d}_{read_type}_001.fastq.gz"
+
+def has_atac_layout(st: FastqStats) -> bool:
+    return best_match(st, "atac") is not None and st.common_length in {16, 24}
 
 
-def place_gz(src: str, dst: str, mode: str) -> None:
-    """Put src at dst as a .gz file.
+def entry_source_paths(entries: Sequence[OutputEntry]) -> set[str]:
+    return {src for entry in entries for src in entry.sources}
 
-    gz source: hardlink / symlink / copy according to mode.
-    bz2 or plain source: stream-recompress to gz (Cell Ranger cannot read bz2,
-    and the .gz name must not lie about the contents).
-    """
-    comp = compression_of(src)
-    if comp == "gz":
-        if os.path.lexists(dst):
-            os.remove(dst)
-        if mode == "hardlink":
+
+def fail_if_unassigned(stats: List[FastqStats], entries: Sequence[OutputEntry], excluded: Sequence[str], context: str) -> None:
+    assigned = entry_source_paths(entries)
+    excluded_set = set(excluded)
+    unassigned = [st for st in stats if st.path not in assigned and st.path not in excluded_set]
+    if unassigned:
+        detail = ", ".join(f"{st.basename}({st.common_length}bp,{st.existing_read_type or '?'})" for st in unassigned)
+        raise TenxInferenceError(f"Unassigned FASTQ(s) remain after {context}: {detail}. Refusing to guess or silently drop reads.")
+
+
+def apply_forced_lane(plan: InferencePlan, lane_number: Optional[int]) -> None:
+    if lane_number is None:
+        return
+    existing = {entry.lane for entry in plan.entries}
+    if len(existing) > 1:
+        raise TenxInferenceError("--lane can only be used when the input resolves to exactly one lane")
+    lane = f"L{lane_number:03d}"
+    for entry in plan.entries:
+        entry.lane = lane
+        entry.output_name = cellranger_name(plan.sample, lane, entry.read_type)
+
+
+def infer_plan(stats: List[FastqStats], args: argparse.Namespace) -> InferencePlan:
+    has_gex = any(has_gex_layout(st) for st in stats)
+    has_atac = any(has_atac_layout(st) for st in stats)
+    if has_gex and has_atac and not args.prefer_gex:
+        raise TenxInferenceError(
+            "Both GEX and ATAC barcode evidence was detected. Refusing to mix modalities; rerun with --prefer-gex "
+            "to emit only the GEX library for STARsolo, or process ATAC separately with --allow-atac-output."
+        )
+    if has_gex:
+        return classify_gex(stats, args, allow_excluded=args.prefer_gex)
+    if has_atac:
+        plan = classify_atac(stats, args)
+        if args.require_starsolo_compatible or not args.allow_atac_output:
+            raise TenxInferenceError(
+                "Detected ATAC-only 10x library; it is not a STARsolo Gene Expression input. "
+                "Pass --allow-atac-output only when you intentionally want Cell Ranger/ARC ATAC-style FASTQs."
+            )
+        return plan
+    raise TenxInferenceError("No file matched a known 10x whitelist with expected read geometry")
+
+def write_existing_fastq_as_gz(src: Path, dest: Path, action: str) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists() or dest.is_symlink():
+        dest.unlink()
+    if compression_of(src) == "gz":
+        if action == "hardlink":
             try:
-                os.link(os.path.realpath(src), dst)
+                os.link(os.path.realpath(src), dest)
                 return
             except OSError:
-                pass  # cross-device etc. -> fall through
-        if mode in ("hardlink", "symlink"):
-            os.symlink(os.path.realpath(src), dst)
+                # Cross-device links are common in Nextflow work dirs; copy is
+                # safer than silently creating a symlink when hardlink was asked.
+                shutil.copy2(os.path.realpath(src), dest)
+                return
+        if action == "symlink":
+            os.symlink(os.path.realpath(src), dest)
             return
-        shutil.copy2(os.path.realpath(src), dst)
+        shutil.copy2(os.path.realpath(src), dest)
         return
-    # recompress
-    info(f"  recompressing {os.path.basename(src)} ({comp}) -> gzip")
-    with open_binary(src) as fin, gzip.open(dst, "wb") as fout:
-        shutil.copyfileobj(fin, fout, length=1 << 20)
+    with open_bytes_auto(src) as in_handle, gzip.open(dest, "wb", compresslevel=6) as out_handle:
+        shutil.copyfileobj(in_handle, out_handle, length=1024 * 1024)
 
 
-def merge_cb_umi(cb_path: str, umi_path: str, dst: str, cb_len: int) -> None:
-    """Reconstruct a STARsolo-compatible R1 = CB + UMI for 3' v1 data."""
-    info(f"  reconstructing R1 = CB({cb_len}) + UMI from "
-         f"{os.path.basename(cb_path)} + {os.path.basename(umi_path)}")
+def write_synthetic_cb_umi(cb_path: Path, umi_path: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
     n = 0
-    with open_text(cb_path) as fcb, open_text(umi_path) as fumi, \
-            gzip.open(dst, "wt") as out:
-        while True:
-            h1 = fcb.readline()
-            if not h1:
-                break
-            s1 = fcb.readline().rstrip("\n"); fcb.readline(); q1 = fcb.readline().rstrip("\n")
-            h2 = fumi.readline()
-            if not h2:
-                raise DetectionError("UMI read ended before barcode read during merge.")
-            s2 = fumi.readline().rstrip("\n"); fumi.readline(); q2 = fumi.readline().rstrip("\n")
-            if normalize_id(h1.rstrip("\n")) != normalize_id(h2.rstrip("\n")):
-                raise DetectionError(
-                    f"CB/UMI record mismatch at read {n+1}: "
-                    f"{h1.strip()} vs {h2.strip()}")
-            out.write(f"{h1.rstrip(chr(10))}\n{s1[:cb_len]}{s2}\n+\n{q1[:cb_len]}{q2}\n")
+    with gzip.open(dest, "wt", encoding="utf-8") as out_handle:
+        for cb_rec, umi_rec in zip(iter_fastq_records(cb_path), iter_fastq_records(umi_path)):
+            cb_h, cb_seq, cb_plus, cb_qual = cb_rec
+            umi_h, umi_seq, _umi_plus, umi_qual = umi_rec
+            if normalized_read_id(cb_h) != normalized_read_id(umi_h):
+                raise TenxInferenceError(
+                    f"3prime v1 CB/UMI record ID mismatch at record {n+1}: "
+                    f"{normalized_read_id(cb_h)} vs {normalized_read_id(umi_h)}"
+                )
+            out_handle.write(f"{cb_h}\n{cb_seq}{umi_seq}\n{cb_plus}\n{cb_qual}{umi_qual}\n")
             n += 1
-    info(f"  wrote {n:,} reconstructed R1 records")
+    # Ensure both inputs had the same number of records.
+    cb_count = sum(1 for _ in iter_fastq_records(cb_path))
+    umi_count = sum(1 for _ in iter_fastq_records(umi_path))
+    if cb_count != umi_count or cb_count != n:
+        raise TenxInferenceError(f"3prime v1 CB/UMI record counts differ: {cb_count} vs {umi_count}")
 
 
-def emit(roles: Roles, sample: str, lane: int, outdir: str, mode: str) -> dict:
-    os.makedirs(outdir, exist_ok=True)
-    written: dict[str, str] = {}
-
-    if roles.chem.split_cb_umi:
-        r1 = os.path.join(outdir, cr_name(sample, lane, "R1"))
-        merge_cb_umi(roles.barcode.path, roles.umi.path, r1, cb_len=roles.chem.cb_len)
-        written["R1"] = r1
-    else:
-        r1 = os.path.join(outdir, cr_name(sample, lane, "R1"))
-        place_gz(roles.barcode.path, r1, mode)
-        written["R1"] = r1
-
-    r2 = os.path.join(outdir, cr_name(sample, lane, "R2"))
-    place_gz(roles.cdna.path, r2, mode)
-    written["R2"] = r2
-
-    for fi, lab in ((roles.index1, "I1"), (roles.index2, "I2")):
-        if fi is None:
-            continue
-        dst = os.path.join(outdir, cr_name(sample, lane, lab))
-        place_gz(fi.path, dst, mode)
-        written[lab] = dst
-
-    for lab, p in written.items():
-        info(f"  {lab} -> {os.path.basename(p)}")
-    return written
+def count_fastq_records(path: Path) -> int:
+    return sum(1 for _ in iter_fastq_records(path))
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+def first_normalized_ids(path: Path, n: int) -> List[str]:
+    ids: List[str] = []
+    for h, _s, _p, _q in iter_fastq_records(path):
+        ids.append(normalized_read_id(h))
+        if len(ids) >= n:
+            break
+    return ids
 
-def build_manifest(sample, lane, roles, written, checks, args) -> dict:
-    chem = roles.chem
-    def src(fi): return os.path.basename(fi.path) if fi else None
+
+def validate_plan_mates(plan: InferencePlan, args: argparse.Namespace) -> Dict[str, object]:
+    checks: Dict[str, object] = {"counts_checked": not args.no_check_counts, "ids_checked": not args.no_check_ids}
+    entries_by_lane: Dict[str, List[OutputEntry]] = collections.defaultdict(list)
+    for entry in plan.entries:
+        entries_by_lane[entry.lane].append(entry)
+    if not args.no_check_counts:
+        count_report: Dict[str, Dict[str, int]] = {}
+        for lane, entries in sorted(entries_by_lane.items()):
+            counts: Dict[str, int] = {}
+            for entry in entries:
+                for src in entry.sources:
+                    counts[Path(src).name] = count_fastq_records(Path(src))
+            if len(set(counts.values())) > 1:
+                raise TenxInferenceError(f"Read counts differ across mates for {lane}: {counts}")
+            count_report[lane] = counts
+        checks["read_counts"] = count_report
+    if not args.no_check_ids:
+        id_report: Dict[str, object] = {}
+        for lane, entries in sorted(entries_by_lane.items()):
+            r1_entries = [e for e in entries if e.read_type == "R1"]
+            if not r1_entries:
+                continue
+            ref_src = Path(r1_entries[0].sources[0])
+            ref_ids = first_normalized_ids(ref_src, args.id_check_records)
+            lane_report: Dict[str, int] = {}
+            for entry in entries:
+                for src in entry.sources:
+                    p = Path(src)
+                    if p == ref_src:
+                        continue
+                    ids = first_normalized_ids(p, args.id_check_records)
+                    n = min(len(ref_ids), len(ids))
+                    mismatches = sum(1 for a, b in zip(ref_ids[:n], ids[:n]) if a != b)
+                    lane_report[p.name] = mismatches
+                    if mismatches:
+                        raise TenxInferenceError(
+                            f"FASTQ record IDs are not concordant for {lane}: "
+                            f"{mismatches}/{n} mismatch between {ref_src.name} and {p.name}"
+                        )
+            id_report[lane] = lane_report
+        checks["id_mismatches"] = id_report
+    return checks
+
+
+def execute_plan(plan: InferencePlan, outdir: Path, action: str, dry_run: bool) -> None:
+    if dry_run:
+        return
+    outdir.mkdir(parents=True, exist_ok=True)
+    names = [entry.output_name for entry in plan.entries]
+    if len(names) != len(set(names)):
+        raise TenxInferenceError(f"Duplicate output names in plan: {names}")
+    for entry in plan.entries:
+        dest = outdir / entry.output_name
+        if entry.synthetic:
+            if len(entry.sources) != 2:
+                raise TenxInferenceError(f"Synthetic entry requires CB and UMI sources: {entry}")
+            write_synthetic_cb_umi(Path(entry.sources[0]), Path(entry.sources[1]), dest)
+        else:
+            if len(entry.sources) != 1:
+                raise TenxInferenceError(f"Non-synthetic entry requires one source: {entry}")
+            write_existing_fastq_as_gz(Path(entry.sources[0]), dest, action)
+
+
+def write_manifest(plan: InferencePlan, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("sample\tchemistry_id\tmodality\tlane\tread_type\toutput_name\tsynthetic\tsources\n")
+        for entry in plan.entries:
+            handle.write(
+                f"{plan.sample}\t{plan.chemistry_id}\t{plan.modality}\t{entry.lane}\t{entry.read_type}\t"
+                f"{entry.output_name}\t{entry.synthetic}\t{';'.join(entry.sources)}\n"
+            )
+
+
+def report_dict(plan: Optional[InferencePlan], error: Optional[str] = None, stats: Optional[List[FastqStats]] = None) -> Dict[str, object]:
+    if plan is None:
+        return {"ok": False, "error": error, "stats": [st.to_json() for st in (stats or [])]}
+    r1_umi = next((e.umi_len for e in plan.entries if e.read_type == "R1" and e.umi_len is not None), None)
+    cb_len = None
+    for st in plan.stats:
+        m = best_match(st, plan.modality if plan.modality in {"gex", "atac"} else None)
+        if m is not None and ((plan.modality == "gex" and has_gex_layout(st)) or (plan.modality == "atac" and has_atac_layout(st))):
+            cb_len = m.cb_len
+            break
     return {
-        "sample": sample,
-        "lane": lane,
-        "chemistry": chem.key,
-        "chemistry_label": chem.label,
-        "generation": chem.generation,
-        "whitelist": chem.whitelist,
-        "cb_length": chem.cb_len,
-        "umi_length": roles.effective_umi_len,
-        "umi_length_nominal": chem.umi_len,
-        "strand": chem.strand,                       # "Unknown" -> resolve downstream
-        "strand_resolved_downstream": chem.strand == "Unknown",
-        "split_cb_umi": chem.split_cb_umi,
-        "index_order_confident": roles.index_order_confident,
-        "file_roles": {
-            "R1_source": src(roles.barcode),
-            "UMI_source": src(roles.umi),
-            "R2_source": src(roles.cdna),
-            "I1_source": src(roles.index1),
-            "I2_source": src(roles.index2),
-        },
-        "renamed": {k: os.path.basename(v) for k, v in written.items()},
-        "whitelist_match_fraction": {
-            os.path.basename(fi.path): {k: round(v, 4) for k, v in fi.wl_match.items()}
-            for fi in roles_all_infos(roles)
-        },
-        "read_geometry": {
-            os.path.basename(fi.path): {
-                "median_len": fi.median_len,
-                "min_len": fi.min_len,
-                "max_len": fi.max_len,
-                "distinct_len": fi.distinct_len,
-                "role": fi.role,
-            } for fi in roles_all_infos(roles)
-        },
-        "checks": checks,
-        "warnings": roles.warnings,
-        "tool": {
-            "name": "infer_10x_chemistry.py",
-            "n_sample": args.n_sample,
-            "n_scan": args.n_scan,
-            "min_frac": args.min_frac,
-        },
+        "ok": True,
+        "sample": plan.sample,
+        "chemistry_id": plan.chemistry_id,
+        "chemistry_label": plan.chemistry_label,
+        "modality": plan.modality,
+        "cb_len": cb_len,
+        "umi_len": r1_umi,
+        "usable_for_starsolo": plan.usable_for_starsolo,
+        "confidence": plan.confidence,
+        "warnings": plan.warnings,
+        "excluded_files": plan.excluded_files,
+        "checks": plan.checks,
+        "outputs": [asdict(e) for e in plan.entries],
+        "stats": [st.to_json() for st in plan.stats],
     }
 
 
-def roles_all_infos(roles: Roles) -> list[FastqInfo]:
-    out = [roles.barcode, roles.cdna]
-    for fi in (roles.umi, roles.index1, roles.index2):
-        if fi is not None:
-            out.append(fi)
-    return out
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("fastqs", nargs="*", type=Path, help="Input FASTQ/FASTQ.GZ/FASTQ.BZ2 files for one sample")
+    parser.add_argument("--fastqs", dest="fastqs_opt", nargs="+", type=Path, help="Input FASTQ files; compatibility alias for positional inputs")
+    parser.add_argument("--sample", "--sample-id", dest="sample", required=True, help="Output sample name used in Cell Ranger FASTQ names")
+    parser.add_argument("--whitelists", "--whitelist-dir", dest="whitelists", required=True, type=Path, help="Directory containing 10x barcode whitelist files")
+    parser.add_argument("--outdir", required=True, type=Path, help="Output directory for normalized FASTQs")
+    parser.add_argument("--json", dest="json_path", type=Path, default=Path("tenx_fastq_inference.json"))
+    parser.add_argument("--manifest", type=Path, default=Path("tenx_fastq_manifest.tsv"))
+    parser.add_argument("--lane", type=int, default=None, help="Force a single output lane number, e.g. 1 -> L001")
+    parser.add_argument("--sample-records", "--n-sample", dest="sample_records", type=int, default=200000, help="Records sampled per FASTQ")
+    parser.add_argument("--min-whitelist-hits", type=int, default=1000)
+    parser.add_argument("--min-whitelist-fraction", "--min-frac", dest="min_whitelist_fraction", type=float, default=0.20)
+    parser.add_argument("--min-bio-read-length", "--min-cdna", dest="min_bio_read_length", type=int, default=40)
+    parser.add_argument("--min-gex-r2-length", type=int, default=60)
+    parser.add_argument("--min-atac-genomic-read-length", type=int, default=40, help="Minimum length for ATAC genomic R1/R2 reads")
+    parser.add_argument("--allow-v1-umi-lengths", default="5,10", help="Comma-separated 3prime v1 UMI lengths to accept")
+    parser.add_argument("--prefer-gex", action="store_true", help="If GEX and ATAC are both detected, emit only GEX inputs")
+    parser.add_argument("--allow-atac-output", action="store_true", help="Permit ATAC-only Cell Ranger/ARC-style output; otherwise ATAC-only inputs fail safely")
+    parser.add_argument("--require-starsolo-compatible", "--require-gex", action="store_true", help="Fail if the detected library is not GEX/STARsolo compatible")
+    parser.add_argument("--allow-missing-whitelists", action="store_true", help="Do not require every known whitelist family to be present; useful only for tests")
+    parser.add_argument("--no-check-counts", action="store_true", help="Skip exact read-count equality checks across emitted mates")
+    parser.add_argument("--no-check-ids", action="store_true", help="Skip FASTQ record ID concordance checks across emitted mates")
+    parser.add_argument("--id-check-records", type=int, default=1000, help="Number of leading records for mate ID concordance checks")
+    parser.add_argument(
+        "--action",
+        "--mode",
+        dest="action",
+        choices=("copy", "link", "symlink", "hardlink"),
+        default="symlink",
+        help="How to handle existing gzipped inputs",
+    )
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
+    if args.fastqs_opt:
+        if args.fastqs:
+            parser.error("Use either positional FASTQs or --fastqs, not both")
+        args.fastqs = args.fastqs_opt
+    delattr(args, "fastqs_opt")
+    if not args.fastqs:
+        parser.error("At least two FASTQ files are required")
+    if len(args.fastqs) < 2:
+        parser.error("Need at least two FASTQ files: a barcode read and a biological read")
+    if not SAMPLE_RE.fullmatch(args.sample):
+        parser.error(f"Unsafe sample name for Cell Ranger FASTQ naming: {args.sample!r}")
+    if args.lane is not None and not (1 <= args.lane <= 999):
+        parser.error("--lane must be in the range 1..999")
+    if args.action == "link":
+        args.action = "symlink"
+    args.allow_v1_umi_lengths = {int(x) for x in str(args.allow_v1_umi_lengths).split(",") if x.strip()}
+    for path in args.fastqs:
+        if not path.exists():
+            parser.error(f"Input FASTQ does not exist: {path}")
+    if not args.whitelists.exists():
+        parser.error(f"Whitelist directory does not exist: {args.whitelists}")
+    return args
 
-
-def main(argv=None) -> int:
-    p = argparse.ArgumentParser(
-        description="Infer 10x chemistry from FASTQ geometry + whitelists and "
-                    "rename to the Cell Ranger convention.")
-    p.add_argument("--fastqs", nargs="+", required=True,
-                   help="All FASTQ files for ONE sample/lane (2-4 files).")
-    p.add_argument("--sample-id", required=True, help="Output sample name.")
-    p.add_argument("--whitelist-dir",
-                   default=os.environ.get("TENX_WHITELIST_DIR",
-                                          "/nfs/cellgeni/STAR/whitelists"),
-                   help="Directory holding the 10x barcode whitelist .txt files.")
-    p.add_argument("--outdir", default="renamed", help="Where to write renamed files.")
-    p.add_argument("--lane", type=int, default=1, help="Lane number (default 1).")
-    p.add_argument("--json", default=None,
-                   help="Path for the chemistry manifest JSON "
-                        "(default <outdir>/<sample>.chemistry.json).")
-    p.add_argument("--mode", choices=["hardlink", "symlink", "copy"],
-                   default="hardlink",
-                   help="How to place already-gzipped reads (default hardlink).")
-    p.add_argument("--n-sample", type=int, default=200_000,
-                   help="Reads to sample for detection (default 200000).")
-    p.add_argument("--n-scan", type=int, default=2_000_000,
-                   help="Cap on reads scanned per file (default 2000000).")
-    p.add_argument("--min-frac", type=float, default=0.25,
-                   help="Min fraction of sampled reads matching a whitelist "
-                        "to call the barcode read (default 0.25).")
-    p.add_argument("--min-cdna", type=int, default=40,
-                   help="Minimum median length to accept a read as cDNA/R2.")
-    p.add_argument("--max-index", type=int, default=14,
-                   help="Maximum median length for a read to count as an index.")
-    p.add_argument("--no-check-counts", action="store_true",
-                   help="Skip the exact read-count equality check (faster).")
-    p.add_argument("--no-check-ids", action="store_true",
-                   help="Skip the record-ID concordance check.")
-    args = p.parse_args(argv)
-
-    fastqs = []
-    for f in args.fastqs:
-        if not os.path.exists(f):
-            err(f"file not found: {f}")
-            return 2
-        fastqs.append(f)
-    if len(fastqs) < 2:
-        err("Need at least 2 FASTQ files (a barcode read and a cDNA read).")
-        return 2
-
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = parse_args(argv)
+    stats: List[FastqStats] = []
+    plan: Optional[InferencePlan] = None
     try:
-        info(f"Sampling {len(fastqs)} FASTQ files "
-             f"(n_sample={args.n_sample:,}, n_scan={args.n_scan:,}) ...")
-        infos = [sample_fastq(f, args.n_sample, args.n_scan) for f in fastqs]
-        for fi in infos:
-            info(f"  {os.path.basename(fi.path):<40} "
-                 f"median={fi.median_len:>4}bp  range={fi.min_len}-{fi.max_len}  "
-                 f"distinct_len={fi.distinct_len}  comp={fi.compression}")
-
-        info("Matching reads against whitelists ...")
-        chem, barcode_fi = detect_chemistry(infos, args.whitelist_dir, args.min_frac)
-
-        roles = assign_roles(infos, chem, barcode_fi, args.min_cdna, args.max_index)
-        checks = validate(roles, not args.no_check_counts, not args.no_check_ids)
-
-        written = emit(roles, args.sample_id, args.lane, args.outdir, args.mode)
-        manifest = build_manifest(args.sample_id, args.lane, roles, written, checks, args)
-
-        json_path = args.json or os.path.join(args.outdir,
-                                              f"{args.sample_id}.chemistry.json")
-        with open(json_path, "w") as fh:
-            json.dump(manifest, fh, indent=2)
-        info(f"Wrote manifest: {json_path}")
-
-        for w in roles.warnings:
-            warn(w)
-        info("DONE.")
+        stats = collect_stats(args.fastqs, args.sample_records)
+        match_whitelists(stats, WhitelistStore(args.whitelists), args)
+        plan = infer_plan(stats, args)
+        apply_forced_lane(plan, args.lane)
+        plan.checks = validate_plan_mates(plan, args)
+        execute_plan(plan, args.outdir, args.action, args.dry_run)
+        write_manifest(plan, args.manifest)
+        args.json_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.json_path, "w", encoding="utf-8") as handle:
+            json.dump(report_dict(plan), handle, indent=2, sort_keys=True)
+        if plan.warnings:
+            for warning in plan.warnings:
+                print(f"WARNING: {warning}", file=sys.stderr)
+        if plan.excluded_files:
+            print("Excluded non-selected files: " + ", ".join(plan.excluded_files), file=sys.stderr)
+        print(
+            f"Detected {plan.chemistry_label} ({plan.chemistry_id}); modality={plan.modality}; "
+            f"outputs={len(plan.entries)}",
+            file=sys.stderr,
+        )
         return 0
-
-    except DetectionError as e:
-        err(str(e))
-        return 1
+    except Exception as exc:
+        args.json_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.json_path, "w", encoding="utf-8") as handle:
+            json.dump(report_dict(None, error=str(exc), stats=stats), handle, indent=2, sort_keys=True)
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

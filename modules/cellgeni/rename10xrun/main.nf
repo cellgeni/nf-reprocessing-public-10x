@@ -17,15 +17,16 @@ process RENAME10XRUN {
     path  "versions.yml",                               emit: versions
 
     script:
-    def args = task.ext.args ?: "--lane 1 --mode symlink"
+    def args = task.ext.args ?: ""
     """
-    infer_10x_chemistry.py \\
+    infer_10x_run.py \\
         --fastqs ${fastqs} \\
-        --sample-id ${meta.id} \\
+        --run-id ${meta.id} \\
         --whitelist-dir ${whitelist_dir} \\
         ${args} \\
         --outdir . \\
-        --json ${meta.id}.chemistry.json
+        --json ${meta.id}.chemistry.json \\
+        --tsv ${meta.id}.chemistry.tsv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

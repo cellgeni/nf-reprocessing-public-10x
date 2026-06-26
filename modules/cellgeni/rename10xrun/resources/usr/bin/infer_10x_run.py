@@ -147,6 +147,10 @@ CHEMISTRIES: Tuple[ChemistryDef, ...] = (
 )
 CHEM_BY_ID = {c.id: c for c in CHEMISTRIES}
 V1_UMI_LENGTHS_DEFAULT = {5, 10}
+# Real public 3' v3-family data can occasionally contain a 26 bp
+# barcode/UMI read: 16 bp CB + 10 observed UMI, despite matching the
+# 3M-february-2018 whitelist. Keep this narrow by default.
+GEX_TRUNCATED_UMI_LENGTHS_DEFAULT = {10}
 ATAC_BARCODE_LENGTHS = {16, 24}
 INDEX_LENGTHS = {6, 7, 8, 9, 10, 14, 16, 24}
 
@@ -308,15 +312,33 @@ def natural_key(value: object) -> Tuple[object, ...]:
     return tuple(int(x) if x.isdigit() else x.lower() for x in re.split(r"(\d+)", str(value)))
 
 
-def collect_fastq_info(paths: Sequence[Path], sample_records: int) -> Tuple[List[FastqInfo], Dict[str, List[str]]]:
+def parse_int_set(value: object, option_name: str) -> set[int]:
+    out: set[int] = set()
+    for raw in str(value).split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            out.add(int(raw))
+        except ValueError as exc:
+            raise TenxRunError(f"{option_name} must be a comma-separated list of integers; got {value!r}") from exc
+    return out
+
+
+def collect_fastq_info(paths: Sequence[Path], sample_records: int, ignore_duplicates: bool = True) -> Tuple[List[FastqInfo], Dict[str, List[str]]]:
     infos: List[FastqInfo] = []
     seq_samples: Dict[str, List[str]] = {}
     resolved: set[Path] = set()
     for path in paths:
         real = path.resolve()
         if real in resolved:
-            raise TenxRunError(f"Duplicate input FASTQ after resolving links: {path}")
+            msg = f"Duplicate input FASTQ after resolving links: {path}"
+            if ignore_duplicates:
+                log("WARN", msg + "; ignoring duplicate path")
+                continue
+            raise TenxRunError(msg)
         resolved.add(real)
+        log("INFO", f"Sampling {path.name} (up to {sample_records:,} records)")
         counts: collections.Counter[int] = collections.Counter()
         seqs: List[str] = []
         for _h, seq, _p, _q in iter_fastq_records(path):
@@ -340,6 +362,7 @@ def collect_fastq_info(paths: Sequence[Path], sample_records: int) -> Tuple[List
             explicit_role=parse_explicit_role(path.name),
             ordinal=parse_ordinal(path.name),
         )
+        log("INFO", f"  {path.name}: sampled {len(seqs):,} records, read length {common_len} bp ({common_n/len(seqs):.1%} constant)")
         infos.append(info)
         seq_samples[info.path] = seqs
     return infos, seq_samples
@@ -347,6 +370,13 @@ def collect_fastq_info(paths: Sequence[Path], sample_records: int) -> Tuple[List
 
 def count_records_strict(path: Path) -> int:
     return sum(1 for _ in iter_fastq_records(path))
+
+def count_records_fast(path: Path) -> int:
+    nl = 0
+    with open_bytes_auto(path) as fh:        # binary, no decode
+        while chunk := fh.read(1 << 20):
+            nl += chunk.count(b"\n")
+    return nl // 4
 
 
 def first_ids(path: Path, n: int) -> List[str]:
@@ -411,18 +441,62 @@ def match_whitelists(infos: List[FastqInfo], seq_samples: Dict[str, List[str]], 
     available = store.available()
     if not available:
         raise TenxRunError(f"No known 10x whitelist files found in {store.whitelist_dir}")
+
+    # table_rows: list of (basename, chem_id, offset, hits, n) for the summary
+    table_rows: List[Tuple[str, str, int, int, int]] = []
+
     for info in infos:
         seqs = seq_samples[info.path]
+        n = len(seqs)
+        # Pre-build barcode-slice counters once per unique (offset, cb_len) geometry.
+        slice_counts: Dict[Tuple[int, int], collections.Counter] = {}
+        for chem in available:
+            for offset in chem.barcode_offsets:
+                end = offset + chem.cb_len
+                if info.common_length < end:
+                    continue
+                key = (offset, chem.cb_len)
+                if key not in slice_counts:
+                    slice_counts[key] = collections.Counter(
+                        seq[offset:end] for seq in seqs if len(seq) >= end
+                    )
+        log("INFO", f"Matching {info.basename} against {len(available)} whitelists")
+        if not slice_counts:
+            table_rows.append((info.basename, "(too short for any chemistry)", 0, 0, n))
         for chem in available:
             wl = store.get(chem)
             for offset in chem.barcode_offsets:
-                if info.common_length < offset + chem.cb_len:
+                end = offset + chem.cb_len
+                key = (offset, chem.cb_len)
+                if key not in slice_counts:
                     continue
-                hits = sum(1 for seq in seqs if len(seq) >= offset + chem.cb_len and seq[offset : offset + chem.cb_len] in wl)
-                frac = hits / len(seqs)
+                counts = slice_counts[key]
+                hits = sum(counts[bc] for bc in counts if bc in wl)
+                frac = hits / n
+                table_rows.append((info.basename, chem.id, offset, hits, n))
                 if hits >= args.min_whitelist_hits and frac >= args.min_whitelist_fraction:
-                    info.matches.append(Match(chem.id, chem.modality, chem.label, offset, hits, len(seqs), frac))
+                    info.matches.append(Match(chem.id, chem.modality, chem.label, offset, hits, n, frac))
         info.matches.sort(key=lambda m: (m.fraction, m.hits, -m.offset), reverse=True)
+        if info.matches:
+            top = info.matches[0]
+            log("INFO", f"  {info.basename}: {len(info.matches)} chemistry match(es); best={top.chemistry_id} ({top.fraction:.1%})")
+        else:
+            log("INFO", f"  {info.basename}: no chemistry matched thresholds")
+
+    # Print per-file whitelist hit table to stderr.
+    col_file = max(len(r[0]) for r in table_rows) if table_rows else 8
+    col_chem = max(len(r[1]) for r in table_rows) if table_rows else 12
+    header = f"{'file':<{col_file}}  {'chemistry':<{col_chem}}  {'offset':>6}  {'hits':>8}  {'sampled':>8}  {'fraction':>8}"
+    sep = "-" * len(header)
+    log("INFO", "Whitelist hit summary:")
+    print(f"  {header}", file=sys.stderr)
+    print(f"  {sep}", file=sys.stderr)
+    prev_file = None
+    for basename, chem_id, offset, hits, n in table_rows:
+        frac = hits / n
+        file_col = basename if basename != prev_file else ""
+        prev_file = basename
+        print(f"  {file_col:<{col_file}}  {chem_id:<{col_chem}}  {offset:>6}  {hits:>8}  {n:>8}  {frac:>7.1%}", file=sys.stderr)
 
 
 def matches_for(info: FastqInfo, modality: Optional[str] = None) -> List[Match]:
@@ -434,25 +508,154 @@ def best_match(info: FastqInfo, modality: Optional[str] = None) -> Optional[Matc
     return ms[0] if ms else None
 
 
+def gex_barcode_layout_length(info: FastqInfo, args: argparse.Namespace) -> int:
+    """Length used to decide whether a barcode read contains CB+UMI.
+
+    Normally this is the modal/common sampled length. With --ignore-variable-length,
+    use the maximum sampled length so a variable file can be assessed by whether
+    any reads contain the expected prefix, while still warning later that the
+    selected FASTQ is variable.
+    """
+    return info.max_length if args.ignore_variable_length else info.common_length
+
+
+def gex_observed_umi_len(info: FastqInfo, args: argparse.Namespace) -> Optional[int]:
+    """Return the UMI length that can be extracted from a GEX barcode read.
+
+    For ordinary non-v1 chemistries this is the expected chemistry UMI length.
+    For a narrowly allowed public-data exception, 3' v3-family whitelist reads
+    of length 26 are treated as 16 bp CB + 10 bp observed/truncated UMI.
+    """
+    m = best_match(info, "gex")
+    if not m:
+        return None
+    chem = CHEM_BY_ID[m.chemistry_id]
+    layout_len = gex_barcode_layout_length(info, args)
+    if chem.split_v1:
+        if layout_len == chem.cb_len:
+            return None
+        observed = layout_len - chem.cb_len
+        return observed if observed in args.allow_v1_umi_lengths else None
+    if chem.umi_len is None:
+        return None
+    observed = layout_len - chem.cb_len
+    if observed >= chem.umi_len:
+        return chem.umi_len
+    if chem.id == "gex_3pv3_family" and observed in args.allow_gex_truncated_umi_lengths:
+        return observed
+    return None
+
+
 def geometry_gex_candidate(info: FastqInfo, args: argparse.Namespace) -> bool:
     m = best_match(info, "gex")
     if not m:
         return False
     chem = CHEM_BY_ID[m.chemistry_id]
-    if chem.split_v1:
-        if info.common_length == chem.cb_len:
-            return True
-        return (info.common_length - chem.cb_len) in args.allow_v1_umi_lengths
-    return chem.umi_len is not None and info.common_length >= chem.cb_len + chem.umi_len
+    if chem.split_v1 and gex_barcode_layout_length(info, args) == chem.cb_len:
+        return True
+    return gex_observed_umi_len(info, args) is not None
 
 
 def geometry_atac_candidate(info: FastqInfo) -> bool:
     return best_match(info, "atac") is not None and info.common_length in ATAC_BARCODE_LENGTHS
 
 
-def require_constant(info: FastqInfo, role: str, min_fraction: float) -> None:
-    if info.common_fraction < min_fraction:
-        raise TenxRunError(f"{info.basename}: {role} has variable lengths {info.length_counts}; unsafe to rename")
+def require_constant(
+    info: FastqInfo,
+    role: str,
+    min_fraction: float,
+    args: argparse.Namespace,
+    warnings: Optional[List[str]] = None,
+) -> None:
+    if info.common_fraction >= min_fraction:
+        return
+    msg = f"{info.basename}: {role} has variable lengths {info.length_counts}; unsafe to rename"
+    if args.ignore_variable_length:
+        note = msg + "; accepted because --ignore-variable-lengths was set"
+        if warnings is not None:
+            warnings.append(note)
+        else:
+            log("WARN", note)
+        return
+    raise TenxRunError(msg)
+
+
+def duplicate_role_key(info: FastqInfo, args: argparse.Namespace) -> Optional[Tuple[object, ...]]:
+    if geometry_gex_candidate(info, args):
+        m = best_match(info, "gex")
+        return ("gex_barcode", m.chemistry_id if m else "", info.common_length)
+    if geometry_atac_candidate(info):
+        m = best_match(info, "atac")
+        return ("atac_barcode", m.chemistry_id if m else "", info.common_length)
+    if best_match(info) is None and info.common_length >= args.min_bio_read_length:
+        return ("biological", info.common_length)
+    if best_match(info) is None and info.common_length in INDEX_LENGTHS:
+        return ("index", info.common_length)
+    return None
+
+
+def prune_duplicate_inputs(infos: List[FastqInfo], args: argparse.Namespace) -> Tuple[List[FastqInfo], List[str], List[str]]:
+    """Remove redundant duplicate-looking FASTQs before role inference.
+
+    This intentionally happens after whitelist matching so that duplicate barcode
+    reads are compared by inferred role/chemistry rather than by filename alone.
+    The main public-data case is an unnumbered SRR.fastq.gz appearing alongside
+    the numbered SRR_1/SRR_2 mates. We keep numbered mates and ignore the
+    redundant unnumbered file when the role signature is otherwise duplicated.
+    """
+    if not args.ignore_duplicates:
+        return infos, [], []
+
+    warnings: List[str] = []
+    excluded: List[str] = []
+    drop_paths: set[str] = set()
+
+    groups: Dict[Tuple[object, ...], List[FastqInfo]] = collections.defaultdict(list)
+    for info in infos:
+        key = duplicate_role_key(info, args)
+        if key is not None:
+            groups[key].append(info)
+
+    for key, group in groups.items():
+        if len(group) < 2:
+            continue
+        numbered = [i for i in group if i.ordinal is not None or i.explicit_role is not None]
+        unnumbered = [i for i in group if i.ordinal is None and i.explicit_role is None]
+        if numbered and unnumbered:
+            kept = ", ".join(i.basename for i in sorted(numbered, key=lambda x: natural_key(x.path)))
+            for info in sorted(unnumbered, key=lambda x: natural_key(x.path)):
+                drop_paths.add(info.path)
+                excluded.append(info.path)
+                warnings.append(
+                    f"Ignored duplicate-looking unnumbered FASTQ {info.basename} "
+                    f"with role signature {key}; kept numbered/explicit mate(s): {kept}"
+                )
+
+    numbered_count = sum(1 for i in infos if i.ordinal is not None or i.explicit_role is not None)
+    for info in infos:
+        if info.path in drop_paths:
+            continue
+        if info.ordinal is not None or info.explicit_role is not None:
+            continue
+        if numbered_count < 2:
+            continue
+        if info.matches:
+            continue
+        if info.common_length in INDEX_LENGTHS or info.common_length >= args.min_bio_read_length:
+            continue
+        drop_paths.add(info.path)
+        excluded.append(info.path)
+        warnings.append(
+            f"Ignored unnumbered unassigned FASTQ {info.basename} "
+            f"(length {info.common_length}, sampled {info.sampled_records}); no 10x role matched while numbered mates were present"
+        )
+
+    pruned = [i for i in infos if i.path not in drop_paths]
+    if not pruned:
+        raise TenxRunError("All FASTQ inputs were removed as duplicates/unassigned extras")
+    if len(pruned) != len(infos):
+        log("WARN", "Ignored duplicate/unassigned FASTQ(s): " + ", ".join(Path(x).name for x in excluded))
+    return pruned, warnings, excluded
 
 
 # ---------------------------------------------------------------------------
@@ -498,7 +701,7 @@ def classify_gex(infos: List[FastqInfo], store: WhitelistStore, args: argparse.N
     match = best_match(barcode, "gex")
     assert match is not None
     chem = CHEM_BY_ID[match.chemistry_id]
-    require_constant(barcode, "GEX barcode read", args.min_barcode_common_fraction)
+    require_constant(barcode, "GEX barcode read", args.min_barcode_common_fraction, args, warnings)
     roles: Dict[str, FastqInfo] = {}
     outputs: List[OutputEntry] = []
 
@@ -506,7 +709,7 @@ def classify_gex(infos: List[FastqInfo], store: WhitelistStore, args: argparse.N
         remaining = [i for i in infos if i is not barcode]
         umi_files = [i for i in remaining if i.common_length in args.allow_v1_umi_lengths]
         umi = choose_one(umi_files, "3' v1 UMI read")
-        require_constant(umi, "3' v1 UMI read", args.min_barcode_common_fraction)
+        require_constant(umi, "3' v1 UMI read", args.min_barcode_common_fraction, args, warnings)
         bio_files = [i for i in remaining if i is not umi and i.common_length >= args.min_bio_read_length]
         bio = choose_one(bio_files, "3' v1 biological read")
         index_files = [i for i in remaining if i is not umi and i is not bio]
@@ -531,11 +734,22 @@ def classify_gex(infos: List[FastqInfo], store: WhitelistStore, args: argparse.N
             raise TenxRunError(f"Merged 3' v1 read length {barcode.common_length} implies UMI {umi_len}, not in {sorted(args.allow_v1_umi_lengths)}")
     else:
         expected = chem.cb_len + (chem.umi_len or 0)
-        if barcode.common_length < expected:
-            raise TenxRunError(f"{barcode.basename}: GEX barcode read length {barcode.common_length} is shorter than CB+UMI {expected}")
-        umi_len = chem.umi_len
-        if barcode.common_length > expected:
-            warnings.append(f"Barcode read {barcode.basename} is over-sequenced: {barcode.common_length} bp > CB+UMI {expected} bp")
+        barcode_layout_len = gex_barcode_layout_length(barcode, args)
+        observed_umi = gex_observed_umi_len(barcode, args)
+        if observed_umi is None:
+            raise TenxRunError(
+                f"{barcode.basename}: GEX barcode read length {barcode_layout_len} "
+                f"does not contain an allowed CB+UMI layout for {chem.id}; expected {expected}"
+            )
+        umi_len = observed_umi
+        if chem.umi_len is not None and observed_umi < chem.umi_len:
+            warnings.append(
+                f"{chem.id} whitelist matched, but barcode read {barcode.basename} has only "
+                f"{observed_umi} observed UMI bases instead of expected {chem.umi_len}; "
+                f"treating as truncated-UMI layout"
+            )
+        elif barcode_layout_len > expected:
+            warnings.append(f"Barcode read {barcode.basename} is over-sequenced: observed layout length {barcode_layout_len} bp > CB+UMI {expected} bp")
 
     remaining = [i for i in infos if i is not barcode]
     long_files = [i for i in remaining if i.common_length >= args.min_bio_read_length]
@@ -545,7 +759,7 @@ def classify_gex(infos: List[FastqInfo], store: WhitelistStore, args: argparse.N
             excluded.extend(i.path for i in long_files if i not in preferred)
             long_files = preferred
     bio = choose_one(long_files, "GEX biological R2 read")
-    require_constant(bio, "GEX biological read", args.min_bio_common_fraction)
+    require_constant(bio, "GEX biological read", args.min_bio_common_fraction, args, warnings)
     index_files = [i for i in remaining if i is not bio and i.path not in excluded]
     if allow_excluded and any(geometry_atac_candidate(i) for i in infos):
         keep = [i for i in index_files if i.common_length == 10]
@@ -570,7 +784,7 @@ def classify_atac(infos: List[FastqInfo], store: WhitelistStore, args: argparse.
     match = best_match(barcode, "atac")
     assert match is not None
     chem = CHEM_BY_ID[match.chemistry_id]
-    require_constant(barcode, "ATAC barcode-index read", args.min_barcode_common_fraction)
+    require_constant(barcode, "ATAC barcode-index read", args.min_barcode_common_fraction, args, warnings)
     if barcode.common_length == 24 and match.offset not in (0, 8):
         raise TenxRunError(f"{barcode.basename}: unexpected ATAC barcode offset {match.offset}")
 
@@ -614,24 +828,28 @@ def cr_name(prefix: str, read_type: str) -> str:
 
 
 def infer_plan(infos: List[FastqInfo], store: WhitelistStore, args: argparse.Namespace) -> Plan:
-    has_gex = any(geometry_gex_candidate(i, args) for i in infos)
-    has_atac = any(geometry_atac_candidate(i) for i in infos)
+    working_infos, pre_warnings, pre_excluded = prune_duplicate_inputs(infos, args)
+    has_gex = any(geometry_gex_candidate(i, args) for i in working_infos)
+    has_atac = any(geometry_atac_candidate(i) for i in working_infos)
     if has_gex and has_atac and not args.prefer_gex:
         raise TenxRunError("Both GEX and ATAC barcode evidence detected in one run; refusing to mix modalities without --prefer-gex")
     if has_gex:
-        chem, roles, outputs, warnings, excluded, umi_len = classify_gex(infos, store, args, allow_excluded=args.prefer_gex)
+        chem, roles, outputs, warnings, excluded, umi_len = classify_gex(working_infos, store, args, allow_excluded=args.prefer_gex)
     elif has_atac:
         if args.accept_modalities == "gex":
             raise TenxRunError("Detected ATAC-only 10x run; rerun with --accept-modalities both/atac to audit it, but do not feed it to STARsolo GEX")
-        chem, roles, outputs, warnings, excluded, umi_len = classify_atac(infos, store, args)
+        chem, roles, outputs, warnings, excluded, umi_len = classify_atac(working_infos, store, args)
     else:
         best = []
-        for i in infos:
+        for i in working_infos:
             if i.matches:
                 m = i.matches[0]
                 best.append(f"{i.basename}:{m.chemistry_id}:{m.fraction:.1%}:len={i.common_length}")
         detail = "; ".join(best) or "no whitelist hits"
         raise TenxRunError(f"No supported 10x run layout matched whitelist evidence plus read geometry ({detail})")
+
+    warnings = pre_warnings + warnings
+    excluded = pre_excluded + excluded
 
     if args.accept_modalities != "both" and chem.modality != args.accept_modalities:
         raise TenxRunError(f"Detected modality {chem.modality}, but --accept-modalities={args.accept_modalities}")
@@ -682,13 +900,18 @@ def validate_plan(plan: Plan, args: argparse.Namespace) -> Dict[str, object]:
             if src not in selected_sources:
                 selected_sources.append(src)
     if args.check_counts:
-        counts = {Path(src).name: count_records_strict(Path(src)) for src in selected_sources}
+        log("INFO", f"Counting records in {len(selected_sources)} selected FASTQ(s)")
+        counts = {Path(src).name: count_records_fast(Path(src)) for src in selected_sources}
+        for name, n in counts.items():
+            log("INFO", f"  {name}: {n:,} records")
         if len(set(counts.values())) != 1:
             raise TenxRunError(f"Read counts differ across selected run FASTQs: {counts}")
+        log("INFO", "Record counts consistent across all selected FASTQs")
         checks["record_counts"] = counts
     else:
         checks["record_counts"] = "skipped"
     if args.check_ids:
+        log("INFO", f"Checking read ID concordance across {len(selected_sources)} FASTQ(s) ({args.id_check_records:,} records each)")
         ref = Path(selected_sources[0])
         ref_ids = first_ids(ref, args.id_check_records)
         mismatches: Dict[str, int] = {}
@@ -700,6 +923,7 @@ def validate_plan(plan: Plan, args: argparse.Namespace) -> Dict[str, object]:
                 mismatches[Path(src).name] = mm
         if mismatches:
             raise TenxRunError(f"Read IDs differ across selected run FASTQs: {mismatches}")
+        log("INFO", "Read IDs concordant across all selected FASTQs")
         checks["id_concordance_records"] = len(ref_ids)
     else:
         checks["id_concordance_records"] = "skipped"
@@ -757,19 +981,23 @@ def merge_cb_umi(cb: Path, umi: Path, dest: Path, cb_len: int) -> None:
 
 def emit_outputs(plan: Plan, outdir: Path, action: str, dry_run: bool) -> None:
     if dry_run:
+        log("INFO", "Dry run: skipping output file writing")
         return
     names = [o.output_name for o in plan.outputs]
     if len(names) != len(set(names)):
         raise TenxRunError(f"Duplicate output FASTQ names in run plan: {names}")
+    log("INFO", f"Writing {len(plan.outputs)} output file(s) to {outdir} (action={action})")
     for out in plan.outputs:
         dest = outdir / out.output_name
         if out.synthetic:
             if len(out.sources) != 2:
                 raise TenxRunError(f"Synthetic output requires two source files: {out}")
+            log("INFO", f"  Merging CB+UMI -> {out.output_name}")
             merge_cb_umi(Path(out.sources[0]), Path(out.sources[1]), dest, cb_len=plan.cb_len or 0)
         else:
             if len(out.sources) != 1:
                 raise TenxRunError(f"Non-synthetic output requires one source file: {out}")
+            log("INFO", f"  {out.read_type}: {Path(out.sources[0]).name} -> {out.output_name}")
             place_as_gz(Path(out.sources[0]), dest, action)
 
 
@@ -854,6 +1082,9 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--min-barcode-common-fraction", type=float, default=0.98)
     p.add_argument("--min-bio-common-fraction", type=float, default=0.90)
     p.add_argument("--allow-v1-umi-lengths", default="5,10")
+    p.add_argument("--allow-gex-truncated-umi-lengths", default="10", help="Comma-separated observed UMI lengths allowed for known truncated GEX layouts; currently only applied to gex_3pv3_family")
+    p.add_argument("--ignore-variable-length", "--ignore-variable-lengths", dest="ignore_variable_length", action="store_true", help="Warn instead of failing when selected FASTQ reads have variable lengths; false by default")
+    p.add_argument("--no-ignore-duplicates", dest="ignore_duplicates", action="store_false", default=True, help="Disable automatic ignoring of duplicate-looking unnumbered FASTQs")
     p.add_argument("--action", choices=("copy", "symlink", "hardlink"), default="hardlink")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-check-counts", dest="check_counts", action="store_false", default=True)
@@ -868,7 +1099,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
             p.error(f"FASTQ not found: {f}")
     if not args.whitelist_dir.exists():
         p.error(f"Whitelist directory not found: {args.whitelist_dir}")
-    args.allow_v1_umi_lengths = {int(x) for x in str(args.allow_v1_umi_lengths).split(",") if x.strip()}
+    args.allow_v1_umi_lengths = parse_int_set(args.allow_v1_umi_lengths, "--allow-v1-umi-lengths")
+    args.allow_gex_truncated_umi_lengths = parse_int_set(args.allow_gex_truncated_umi_lengths, "--allow-gex-truncated-umi-lengths")
     if not args.sample_id:
         args.sample_id = args.run_id
     args.fastq_prefix = derive_prefix(args)
@@ -880,14 +1112,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     stats: List[FastqInfo] = []
     try:
         log("INFO", f"Run {args.run_id}: sampling {len(args.fastqs)} FASTQ files")
-        stats, samples = collect_fastq_info(args.fastqs, args.sample_records)
+        stats, samples = collect_fastq_info(args.fastqs, args.sample_records, ignore_duplicates=args.ignore_duplicates)
         for s in stats:
             log("INFO", f"{s.basename}: len={s.common_length} ({s.common_fraction:.1%}), explicit={s.explicit_role}, ordinal={s.ordinal}, comp={s.compression}")
         store = WhitelistStore(args.whitelist_dir)
         if store.missing():
             log("WARN", "Missing optional whitelist definitions: " + ",".join(store.missing()))
         match_whitelists(stats, samples, store, args)
+        log("INFO", "Inferring run layout and assigning read roles")
         plan = infer_plan(stats, store, args)
+        log("INFO", f"Layout: {plan.chemistry_id} ({plan.modality}), confidence={plan.layout_confidence}, strand={plan.strand_hint}")
+        log("INFO", "Validating selected FASTQs")
         plan.checks = validate_plan(plan, args)
         emit_outputs(plan, args.outdir, args.action, args.dry_run)
         args.json_path.parent.mkdir(parents=True, exist_ok=True)
