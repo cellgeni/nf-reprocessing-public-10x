@@ -1,0 +1,50 @@
+---
+name: "cellgeni/sra2fastq"
+description: >
+  Converts a local SRA file to split gzipped FASTQ files using parallel-fastq-dump,
+  producing one FASTQ per read slot ready for downstream processing.
+keywords:
+  - SRA
+  - FASTQ
+  - conversion
+  - single-cell
+  - 10x
+  - public data
+tools:
+  - parallel-fastq-dump:
+      description: "Parallelised wrapper around NCBI fastq-dump for converting SRA files to FASTQ."
+      homepage: "https://github.com/rvalieris/parallel-fastq-dump"
+      licence:
+        - "MIT"
+  - pigz:
+      description: "Parallel gzip compressor used to compress the output FASTQ files."
+      homepage: "https://zlib.net/pigz/"
+      licence:
+        - "zlib"
+input:
+- - meta:
+      type: "map"
+      description: "Map with run-level metadata. Must contain key 'id' with the SRA run accession.\ne.g. [ id:'SRR12345678' ]\n"
+  - sra:
+      type: "file"
+      description: "Local SRA file for the run."
+      pattern: "*.sra"
+output:
+  fastq:
+  - - meta:
+        type: "map"
+        description: "Map with run-level metadata, passed through from input.\ne.g. [ id:'SRR12345678' ]\n"
+    - "*.fastq.gz":
+        type: "file"
+        description: "Split gzipped FASTQ files produced from the SRA file (e.g. SRR12345678_1.fastq.gz, SRR12345678_2.fastq.gz)."
+        pattern: "*.fastq.gz"
+  versions:
+  - path: "versions.yml"
+    type: "file"
+    description: "YAML file recording the parallel-fastq-dump and pigz versions used by this process."
+authors:
+  - "@claptar"
+maintainers:
+  - "@claptar"
+version: "0.0.1"
+license: "MIT"

@@ -1,0 +1,67 @@
+---
+name: "cellgeni/rename10xrun"
+description: >
+  Infers the 10x chemistry and FASTQ layout for a single sequencing run from 2-4
+  input FASTQ files, then emits Cell Ranger-style renamed FASTQs and a per-run
+  chemistry JSON manifest.
+keywords:
+  - 10x
+  - single-cell
+  - FASTQ
+  - chemistry detection
+  - Cell Ranger
+  - barcode
+  - rename
+tools:
+  - infer_10x_run.py:
+      description: "Infers 10x chemistry from barcode whitelist matching and read geometry, and emits renamed Cell Ranger-style FASTQs."
+      homepage: "https://github.com/cellgeni/nf-reprocessing-public-10x"
+      licence:
+        - "MIT"
+input:
+- - meta:
+      type: "map"
+      description: "Map with run-level metadata. Must contain key 'id' with the run accession.\ne.g. [ id:'SRR12345678' ]\n"
+  - fastqs:
+      type: "file"
+      description: "2-4 FASTQ files (gzipped) for the run. Staged under fastqs/."
+      pattern: "*.fastq.gz"
+- - whitelist_dir:
+      type: "directory"
+      description: "Directory containing 10x barcode whitelist files used for chemistry detection."
+output:
+  reads:
+  - - meta:
+        type: "map"
+        description: "Map with run-level metadata, passed through from input.\ne.g. [ id:'SRR12345678' ]\n"
+    - "*_R*_001.fastq.gz":
+        type: "file"
+        description: "Cell Ranger-style renamed biological read FASTQs (R1, R2)."
+        pattern: "*_R*_001.fastq.gz"
+  index:
+  - - meta:
+        type: "map"
+        description: "Map with run-level metadata, passed through from input.\ne.g. [ id:'SRR12345678' ]\n"
+    - "*_I*_001.fastq.gz":
+        type: "file"
+        description: "Cell Ranger-style renamed index read FASTQs (I1, I2), if present."
+        pattern: "*_I*_001.fastq.gz"
+        optional: true
+  chemistry:
+  - - meta:
+        type: "map"
+        description: "Map with run-level metadata, passed through from input.\ne.g. [ id:'SRR12345678' ]\n"
+    - "${meta.id}.chemistry.json":
+        type: "file"
+        description: "JSON manifest with detected chemistry, modality, CB/UMI lengths, strand hint, and output file mapping for this run."
+        pattern: "*.chemistry.json"
+  versions:
+  - path: "versions.yml"
+    type: "file"
+    description: "YAML file recording the Python and infer_10x_run.py versions used by this process."
+authors:
+  - "@claptar"
+maintainers:
+  - "@claptar"
+version: "0.0.1"
+license: "MIT"
