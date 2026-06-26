@@ -141,10 +141,12 @@ workflow {
             }
     
     publish:
-    metadata = REPROCESS10X.out.metadata.map { meta, files -> tuple(unwrapGroupKeys(meta), files) }
-    bam      = REPROCESS10X.out.bam.map { meta, bam -> unwrapGroupKeys(meta) + [path: bam] }
-    sra      = REPROCESS10X.out.sra.map { meta, sra -> unwrapGroupKeys(meta) + [path: sra]}
-    fastq    = REPROCESS10X.out.fastq
+    metadata       = REPROCESS10X.out.metadata.map { meta, files -> tuple(unwrapGroupKeys(meta), files) }
+    bam            = REPROCESS10X.out.bam.map { meta, bam -> unwrapGroupKeys(meta) + [path: bam] }
+    sra            = REPROCESS10X.out.sra.map { meta, sra -> unwrapGroupKeys(meta) + [path: sra]}
+    original_fastq = REPROCESS10X.out.original_fastq.map { meta, fastqs -> unwrapGroupKeys(meta) + [paths: fastqs] }
+    runs           = REPROCESS10X.out.runs.map { meta, fastqs -> unwrapGroupKeys(meta) + [paths: fastqs] }
+    fastq          = REPROCESS10X.out.fastq
         .flatMap { meta, fastqs -> fastqs.collect { file -> [meta, file] } }
         .map { meta, fastq -> unwrapGroupKeys(meta) + [path: fastq] }
     starsolo = REPROCESS10X.out.starsolo.map { meta, starsolo -> unwrapGroupKeys(meta) + [path: starsolo] }
@@ -180,11 +182,31 @@ output {
         label "fastq"
         label "raw"
         index {
-            path "index/fastq.csv"
+            path "index/renamed_fastq.csv"
             header true
             sep ','
         }
-        path { output -> "raw/${output.dataset_id}/fastq/${output.id}" }
+        path { output -> "raw/${output.dataset_id}/renamed_fastq/${output.id}" }
+    }
+    original_fastq {
+        label "fastq"
+        label "raw"
+        index {
+            path "index/original_fastq.csv"
+            header true
+            sep ','
+        }
+        path { output -> "raw/${output.dataset_id}/fastq/${output.sample_id}/${output.id}" }
+    }
+    runs {
+        label "fastq"
+        label "raw"
+        index {
+            path "index/runs.csv"
+            header true
+            sep ','
+        }
+        path { output -> "raw/${output.dataset_id}/runs/${output.sample_id}/${output.id}" }
     }
     starsolo {
         label "starsolo"

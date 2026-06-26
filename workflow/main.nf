@@ -65,7 +65,7 @@ workflow REPROCESS10X {
             human: 'Homo sapiens',
             mouse: 'Mus musculus',
         ]
-        resolved_fastqs = DOWNLOAD10X.out.fastq
+        resolved_fastqs = resolved_fastqs.mix(DOWNLOAD10X.out.fastq)
             .map { meta, fastqs ->
                 def effective_specie
                 if (no_infer_specie) {
@@ -126,11 +126,13 @@ workflow REPROCESS10X {
     }
     
     emit:
-    metadata = metadata
-    fastq    = resolved_fastqs
-    bam      = bams
-    sra      = sras
-    starsolo = starsolo
-    soloqc   = soloqc
-    versions = versions
+    metadata       = metadata
+    original_fastq = DOWNLOAD10X.out.original_fastq
+    runs           = DOWNLOAD10X.out.runs
+    fastq          = resolved_fastqs
+    bam            = bams
+    sra            = sras
+    starsolo       = starsolo
+    soloqc         = soloqc
+    versions       = versions
 }
