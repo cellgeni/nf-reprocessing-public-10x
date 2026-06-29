@@ -17,7 +17,7 @@ process RENAME10XSAMPLE {
     script:
     def args = task.ext.args ?: ""
     """
-    rename_fastqs.py \\
+    rename_fastqs_recommended.py \\
         ${args} \\
         --fastqs ${fastqs} \\
         --sample-id ${meta.id} \\
