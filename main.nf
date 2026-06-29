@@ -22,6 +22,7 @@ def helpMessage() {
         --no_infer_specie   Do not read species from metadata; assign --default_specie to all samples.
                             Requires --default_specie.
         --metaonly          Only fetch metadata, skip downloading and alignment (default: false).
+        --rawonly           Only download raw data, skip STARsolo alignment (default: false).
         --help              Show this help message and exit.
 
     Example:
