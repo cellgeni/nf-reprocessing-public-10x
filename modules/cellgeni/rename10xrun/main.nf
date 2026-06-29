@@ -19,7 +19,7 @@ process RENAME10XRUN {
     script:
     def args = task.ext.args ?: ""
     """
-    infer_10x_run.py \\
+    infer_10x_run_recommended.py \\
         --fastqs ${fastqs} \\
         --run-id ${meta.id} \\
         --whitelist-dir ${whitelist_dir} \\
@@ -31,7 +31,6 @@ process RENAME10XRUN {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python3 --version 2>&1 | sed 's/Python //')
-        infer_10x_chemistry.py: "1.0.0"
     END_VERSIONS
     """
 
@@ -43,7 +42,7 @@ process RENAME10XRUN {
     echo '{"sample":"${meta.id}","chemistry":"stub"}' > ${meta.id}.chemistry.json
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        python: "stub"
+        python: \$(python3 --version 2>&1 | sed 's/Python //')
     END_VERSIONS
     """
 }
