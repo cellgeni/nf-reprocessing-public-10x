@@ -29,7 +29,8 @@ nextflow run main.nf --datasets <datasets.tsv> [OPTIONS]
 | `--default_specie` | Species to assign when metadata is missing or unknown (`human` or `mouse`). Samples without a resolved species are skipped by STARsolo. | `null` |
 | `--no_infer_specie` | Skip reading species from metadata; assign `--default_specie` to all samples. Requires `--default_specie`. | `false` |
 | `--metaonly` | Only fetch metadata — skip downloading and alignment | `false` |
-| `--rawonly` | Only download raw data — skip STARsolo alignment | `false` |
+| `--starsolo` | Run STARsolo alignment after downloading | `false` |
+| `--cellranger` | Run Cell Ranger alignment after downloading (not yet implemented) | `false` |
 | `--help` | Print help message and exit | — |
 
 ### Input file format

@@ -1,4 +1,4 @@
-include { REPROCESS10X_LOADDATA } from '../../../modules/local/reprocess10x/loaddata'
+include { WGET10X } from '../../../modules/cellgeni/wget10x'
 include { REPROCESS10X_BAM2FASTQ } from '../../../modules/local/reprocess10x/bam2fastq'
 include { SRA2FASTQ } from '../../../modules/cellgeni/sra2fastq'
 include { RENAME10XRUN } from '../../../modules/cellgeni/rename10xrun'
@@ -42,21 +42,21 @@ workflow DOWNLOAD10X {
         //.view { meta, url -> "LINKS: meta=[${meta.getGroupTarget().collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], url=$url (${url.getClass().simpleName}), count=${meta.getGroupSize()}" }
                                           
 
-    REPROCESS10X_LOADDATA(collected_links)
+    WGET10X(collected_links)
 
     //REPROCESS10X_LOADDATA.out.fastq.view { meta, fastq -> "FASTQ: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastq=$fastq (${fastq.getClass().simpleName})" }
     //REPROCESS10X_LOADDATA.out.sra.view { meta, sra -> "SRA: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], sra=$sra (${sra.getClass().simpleName})" }
     //REPROCESS10X_LOADDATA.out.bam.view { meta, bam -> "BAM: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], bam=$bam (${bam.getClass().simpleName})" }
 
     // STEP 2: Convert loaded data to fastq if needed
-    bams = bams.mix(REPROCESS10X_LOADDATA.out.bam)
+    bams = bams.mix(WGET10X.out.bam)
     REPROCESS10X_BAM2FASTQ(bams)
     
-    sras = sras.mix(REPROCESS10X_LOADDATA.out.sra)
+    sras = sras.mix(WGET10X.out.sra)
     SRA2FASTQ(sras)
 
     // STEP 3: Rename fastq files to match 10x run naming convention
-    fastqs2rename = REPROCESS10X_LOADDATA.out.fastq
+    fastqs2rename = WGET10X.out.fastq
         // Combine fastq files for each read as they were loaded separately
         .groupTuple(sort: 'hash', remainder: true)
         .mix(SRA2FASTQ.out.fastq)
@@ -102,7 +102,7 @@ workflow DOWNLOAD10X {
     // Collect versions
     versions = versions
         .mix(
-            REPROCESS10X_LOADDATA.out.versions.first(),
+            WGET10X.out.versions.first(),
             REPROCESS10X_BAM2FASTQ.out.versions.first(),
             RENAME10XRUN.out.versions.first(),
             RENAME10XSAMPLE.out.versions.first(),

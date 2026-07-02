@@ -3,17 +3,22 @@ include { DOWNLOAD10X } from '../subworkflows/local/download10x/'
 include { FETCH10XMETA } from 'cellgeni/fetch10xmeta'
 include { STARSOLO10X as STARSOLO10X_HUMAN } from '../subworkflows/local/starsolo10x/'
 include { STARSOLO10X as STARSOLO10X_MOUSE } from '../subworkflows/local/starsolo10x/'
+include { CELLRANGER_COUNT as CELLRANGER_COUNT_HUMAN } from '../modules/cellgeni/cellranger/count'
+include { CELLRANGER_COUNT as CELLRANGER_COUNT_MOUSE } from '../modules/cellgeni/cellranger/count'
 
 workflow REPROCESS10X {
     take:
     datasetlist      // channel: [ val(meta), [ sample_ids ] ]
     wl_basedir       // channel: [ dirpath ] a path to whitelist base directory
-    human_reference  // channel: [ tuple( [id: "human"], file(human_reference) ) ]
-    mouse_reference  // channel: [ tuple( [id: "mouse"], file(mouse_reference) ) ]
-    metaonlyflag     // channel: [ val(metaonlyflag) ] a flag to indicate whether to only fetch metadata without downloading data or running STARsolo (e.g. for testing or debugging)
-    no_infer_specie  // channel: [ val(no_infer_specie) ] a flag to indicate whether to infer specie from metadata or not; if true, all samples will be assigned the default_specie (or 'UNKNOWN' if default_specie is not set)
-    default_specie   // channel: [ val(default_specie) ] the default specie to assign to samples with unknown species in metadata; if not set, 'UNKNOWN' will be used as default specie
-    rawonlyflag      // channel: [ val(rawonlyflag) ] a flag to indicate whether to only download raw data (fastq files) without running STARsolo; if true, STARsolo steps will be skipped
+    star_human_reference  // channel: [ tuple( [id: "human"], file(human_reference) ) ]
+    star_mouse_reference  // channel: [ tuple( [id: "mouse"], file(mouse_reference) ) ]
+    cr_human_reference  // channel: [ tuple( [id: "human"], file(human_reference) ) ]
+    cr_mouse_reference // channel: [ tuple( [id: "mouse"], file(mouse_reference) ) ]
+    metaonlyflag     // channel: [ val(metaonlyflag) ] only fetch metadata, skip download and alignment
+    no_infer_specie  // channel: [ val(no_infer_specie) ] skip reading species from metadata; assign default_specie to all samples
+    default_specie   // channel: [ val(default_specie) ] species to assign when metadata is missing or unknown
+    starsoloflag     // channel: [ val(starsoloflag) ] run STARsolo alignment after downloading
+    cellrangerflag   // channel: [ val(cellrangerflag) ] run Cell Ranger alignment after downloading (not yet implemented)
 
     main:
     // STEP 0.1: Init channels
@@ -24,6 +29,7 @@ workflow REPROCESS10X {
     resolved_fastqs = channel.empty()
     starsolo        = channel.empty()
     soloqc          = channel.empty()
+    cellranger      = channel.empty()
 
     // STEP 0.2: Convert dataset list to channel
     datasets = datasetlist
@@ -103,11 +109,11 @@ workflow REPROCESS10X {
         versions = versions.mix(DOWNLOAD10X.out.versions)
     }
 
-    // STEP 3: Run STARsolo
-    if (!metaonlyflag && !rawonlyflag) {
+    // STEP 3.1: Run STARsolo
+    if (!metaonlyflag && starsoloflag) {
         // Run STARsolo on fastq files for human and mouse samples
-        STARSOLO10X_HUMAN(fastqs.human, human_reference)
-        STARSOLO10X_MOUSE(fastqs.mouse, mouse_reference)
+        STARSOLO10X_HUMAN(fastqs.human, star_human_reference)
+        STARSOLO10X_MOUSE(fastqs.mouse, star_mouse_reference)
 
         // Collect outputs
         starsolo = starsolo.mix(
@@ -124,6 +130,27 @@ workflow REPROCESS10X {
                 STARSOLO10X_MOUSE.out.versions
             )
     }
+
+    // STEP 3.2: Run Cell Ranger
+    if (!metaonlyflag && cellrangerflag) {
+        // Run Cell Ranger on fastq files for human and mouse samples
+        CELLRANGER_COUNT_HUMAN(fastqs.human, cr_human_reference)
+        CELLRANGER_COUNT_MOUSE(fastqs.mouse, cr_mouse_reference)
+
+        // Collect outputs
+        cellranger = cellranger.mix(
+            CELLRANGER_COUNT_HUMAN.out.mapping,
+            CELLRANGER_COUNT_MOUSE.out.mapping
+        )
+        
+        versions = versions
+            .mix(
+                CELLRANGER_COUNT_HUMAN.out.versions.first(),
+                CELLRANGER_COUNT_MOUSE.out.versions.first()
+            )
+    }
+
+
     
     emit:
     metadata       = metadata
@@ -134,5 +161,6 @@ workflow REPROCESS10X {
     sra            = sras
     starsolo       = starsolo
     soloqc         = soloqc
+    cellranger     = cellranger
     versions       = versions
 }
