@@ -36,9 +36,6 @@ input:
   - reference:
       type: "directory"
       description: "STAR genome index directory."
-- - whitelists:
-      type: "directory"
-      description: "Directory containing 10x barcode whitelist files."
 output:
   mapping:
   - - meta:
@@ -56,5 +53,5 @@ authors:
   - "@claptar"
 maintainers:
   - "@claptar"
-version: "0.0.1"
+version: "0.0.2"
 license: "MIT"

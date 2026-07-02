@@ -19,7 +19,6 @@ The module:
 | `fastqs` | files | Gzipped FASTQ files for the sample. |
 | `ref_meta.id` | string | Species/reference identifier used to name the genome directory (e.g. `homo_sapiens`). |
 | `reference` | directory | STAR genome index directory. |
-| `whitelists` | directory | Directory containing 10x barcode whitelist files. |
 
 ## Outputs
 
@@ -35,8 +34,7 @@ include { STARSOLO10X } from 'cellgeni/starsolo10x'
 
 STARSOLO10X(
     channel.of([[id: 'SRR12345678'], file('fastqs/')]),
-    channel.of([[id: 'homo_sapiens'], file('genome/')]),
-    file('whitelists/')
+    channel.of([[id: 'homo_sapiens'], file('genome/')])
 )
 ```
 
