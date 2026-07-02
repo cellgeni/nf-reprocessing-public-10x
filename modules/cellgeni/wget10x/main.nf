@@ -1,4 +1,4 @@
-process REPROCESS10X_LOADDATA {
+process WGET10X {
     tag "Loading ${meta.id}"
 
     container "quay.io/cellgeni/reprocess_10x:latest"
