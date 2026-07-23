@@ -4,9 +4,32 @@ SERIES=$1
 
 if [[ -f $SERIES.urls.list ]]
 then
-  >&2 echo "WARNING: File '$SERIES.urls.list' exists! This should not happen; overwriting the file.." 
+  >&2 echo "WARNING: File '$SERIES.urls.list' exists! This should not happen; overwriting the file.."
   rm $SERIES.urls.list
-fi 
+fi
+
+# Query the NCBI SDL API for one accession, printing the raw JSON body on stdout.
+# Retries on transient network/HTTP failures or an empty response body; returns
+# non-zero (and empty output) only after all attempts are exhausted, so callers
+# fall back exactly as they would on a genuinely empty result.
+sdl_retrieve() {
+  local acc=$1
+  local url="https://locate.ncbi.nlm.nih.gov/sdl/2/retrieve?acc=${acc}&accept-alternate-locations=yes"
+  local tries=${SDL_MAX_TRIES:-4}
+  local attempt body
+  for attempt in $(seq 1 "$tries")
+  do
+    if body=$(curl -sS --fail --retry 3 --retry-delay 2 --retry-connrefused --max-time 60 "$url" 2>/dev/null) && [[ -n $body ]]
+    then
+      printf '%s' "$body"
+      return 0
+    fi
+    >&2 echo "WARNING: SDL query for $acc failed (attempt $attempt/$tries); retrying in $((attempt * 2))s.."
+    sleep $((attempt * 2))
+  done
+  >&2 echo "WARNING: SDL query for $acc failed after $tries attempts; continuing with empty response"
+  return 1
+}
 
 for i in `cat $SERIES.run.list`
 do
@@ -20,7 +43,7 @@ do
   SUCCESS=0
 
   # Try getting BAM file from SDL api
-  SDLBAM=`curl -s "https://locate.ncbi.nlm.nih.gov/sdl/2/retrieve?acc=$i&accept-alternate-locations=yes" | jq -r '
+  SDLBAM=`sdl_retrieve "$i" | jq -r '
           .result[].files[] |
           select(.name | contains("bam")) |
           .locations[] |
@@ -40,7 +63,7 @@ do
   # Try getting SRA file from SDL api
   if [[ $SUCCESS -eq 0 ]]
   then
-    SDLSRA=`curl -s "https://locate.ncbi.nlm.nih.gov/sdl/2/retrieve?acc=$i&accept-alternate-locations=yes" | jq -r '
+    SDLSRA=`sdl_retrieve "$i" | jq -r '
               [
                 .result[]
                 .files[]
