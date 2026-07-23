@@ -66,7 +66,13 @@ workflow DOWNLOAD10X {
         wl_basedir
     )
 
+    // Collect every per-run fastq for each sample before renaming: renamed
+    // ENA/SRA runs (RENAME10XRUN) together with BAM-derived runs
+    // (REPROCESS10X_BAM2FASTQ). Mixing here means a sample whose runs are of
+    // mixed origin (some BAM, some FASTQ) is grouped once and handed to a
+    // single RENAME10XSAMPLE job — instead of being split across two branches.
     sample2rename = RENAME10XRUN.out.reads
+        .mix(REPROCESS10X_BAM2FASTQ.out.fastq)
         .map { run_meta, fastq ->
             def sample_meta = [id: run_meta.sample_id.getGroupTarget(), dataset_id: run_meta.dataset_id, specie: run_meta.specie]
             def run_count = run_meta.sample_id.getGroupSize()
@@ -81,23 +87,10 @@ workflow DOWNLOAD10X {
 
 
     // STEP 4 Collect all outputs
-    // Combine all fastq channels and group by sample
-    fastqs = REPROCESS10X_BAM2FASTQ.out.fastq
-        //.view { meta, fastqs -> "FASTQ MIXED: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
-        // Leave only sample id and dataset id in metadata
-        .map { run_meta, fastq ->
-            def sample_meta = [id: run_meta.sample_id.getGroupTarget(), dataset_id: run_meta.dataset_id, specie: run_meta.specie]
-            def run_count = run_meta.sample_id.getGroupSize()
-            tuple( groupKey(sample_meta, run_count), fastq )
-        }
-        //.view { groupkey, fastqs -> "FASTQ PRE-GROUPED: groupkey=$groupkey (${groupkey.getClass().simpleName}), fastqs=$fastqs (${fastqs.getClass().simpleName})" }
-        // Group by sample id and dataset id
-        .groupTuple(sort: 'hash', remainder: true)
-        //.view { groupkey, fastqs -> "FASTQ GROUPED 2: groupkey=$groupkey (${groupkey.getClass().simpleName}), fastqs=$fastqs (${fastqs.getClass().simpleName})" }
-        // Combine a list of fastq files
-        .map { groupkey, fastqlist -> tuple( groupkey.getGroupTarget(), fastqlist.flatten() ) }
-        .mix(RENAME10XSAMPLE.out.reads)
-        //.view { meta, fastqs -> "FASTQ FINAL: meta=[${meta.collect { k, v -> "$k: $v (${v.getClass().simpleName})" }.join(', ')}], fastqs=$fastqs (${fastqs.getClass().simpleName})" }
+    // Every sample's fastqs now come from a single RENAME10XSAMPLE job (BAM- and
+    // FASTQ-origin runs were merged per sample above), so each sample is emitted
+    // exactly once — no more duplicate STARsolo jobs for the same sample.
+    fastqs = RENAME10XSAMPLE.out.reads
 
     // Collect versions
     versions = versions
