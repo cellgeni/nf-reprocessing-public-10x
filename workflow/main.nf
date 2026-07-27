@@ -22,6 +22,8 @@ workflow REPROCESS10X {
 
     main:
     // STEP 0.1: Init channels
+    original_fastq  = channel.empty()
+    runs            = channel.empty()
     bams            = channel.empty()
     sras            = channel.empty()
     versions        = channel.empty()
@@ -35,9 +37,9 @@ workflow REPROCESS10X {
     datasets = datasetlist
         .splitCsv(header: true, sep: '\t')
         .map { row ->
-            def sample_list =  row.sample_id.split(',')
+            def sample_list =  row.containsKey("sample_id") && row.sample_id ? row.sample_id.split(',') : []
             [
-                [id: groupKey(row.dataset_id, sample_list.size())],
+                [id: sample_list.size() > 0 ? groupKey(row.dataset_id, sample_list.size()) : row.dataset_id],
                 row.sample_id
             ]
         }
@@ -104,9 +106,11 @@ workflow REPROCESS10X {
             }
         
         // Collect channels
-        bams     = bams.mix(DOWNLOAD10X.out.bam)
-        sras     = sras.mix(DOWNLOAD10X.out.sra)
-        versions = versions.mix(DOWNLOAD10X.out.versions)
+        original_fastq = original_fastq.mix(DOWNLOAD10X.out.original_fastq)
+        runs           = runs.mix(DOWNLOAD10X.out.runs)
+        bams           = bams.mix(DOWNLOAD10X.out.bam)
+        sras           = sras.mix(DOWNLOAD10X.out.sra)
+        versions       = versions.mix(DOWNLOAD10X.out.versions)
     }
 
     // STEP 3.1: Run STARsolo
@@ -154,8 +158,8 @@ workflow REPROCESS10X {
     
     emit:
     metadata       = metadata
-    original_fastq = DOWNLOAD10X.out.original_fastq
-    runs           = DOWNLOAD10X.out.runs
+    original_fastq = original_fastq
+    runs           = runs
     fastq          = resolved_fastqs
     bam            = bams
     sra            = sras
