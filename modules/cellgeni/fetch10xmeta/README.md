@@ -7,7 +7,7 @@ or BioProject/ENA (`PRJ*`). For each dataset it:
 
 1. Downloads raw metadata from NCBI SRA, EBI ENA, or BioStudies depending on accession type.
 2. Resolves sample accessions to experiment and run IDs, building an accessions map.
-3. Classifies each run by download type (paired-end FASTQs, 10x BAM, or SRA) via `parse_ena_metadata.sh` / `parse_sra_metadata.sh`.
+3. Classifies each run by download type (paired-end FASTQs, 10x BAM, or SRA) and assigns its species via `parse_metadata.sh`, which reads the ENA and SRA tables together — a run is often listed in only one of them, and the species recorded in the other is what keeps it from being reported as `UNKNOWN`. ENA is preferred wherever both have an answer, and the NCBI SDL API is queried at most once per run.
 4. Merges the per-run classification with sample IDs into `links.tsv` via `add_samples.awk`.
 
 For GEO datasets the module falls back through project IDs → sub-series project IDs → BioSample IDs if earlier ENA/SRA metadata downloads fail.

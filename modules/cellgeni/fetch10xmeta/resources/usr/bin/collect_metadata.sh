@@ -238,7 +238,7 @@ function get_sample_ids() {
   return $STATUS
 }
 
-subset_accessions() {
+subset_sample_list() {
   local SERIES=$1
   local SUBSET=${2:-""}
 
@@ -249,9 +249,19 @@ subset_accessions() {
     >&2 cat $SUBSET
     ## add newline character to the end of the file if there is none
     sed -i -e '$a\' $SUBSET
-    ## subset the accessions file
+    ## subset the sample list
     grep -f $SUBSET $SERIES.sample.list > $SERIES.sample.list.tmp
     mv $SERIES.sample.list.tmp $SERIES.sample.list
+  fi
+}
+
+subset_accessions() {
+  local SERIES=$1
+  local SUBSET=${2:-""}
+
+  if [[ -s $SUBSET ]]
+  then
+    ## subset the accessions file
     grep -f $SUBSET $SERIES.accessions.tsv > $SERIES.accessions.tsv.tmp
     mv $SERIES.accessions.tsv.tmp $SERIES.accessions.tsv
   fi
@@ -265,6 +275,30 @@ subset_meta() {
   then
     grep -f $SUBSET $META > $META.tmp
     mv $META.tmp $META
+  fi
+}
+
+## narrow one metadata table down to the requested samples, preferring the
+## caller's subset and falling back to the BioSample IDs when the table is keyed
+## by those instead. A missing table is not an error: only one of ENA/SRA may exist.
+subset_metadata_table() {
+  local SERIES=$1
+  local META=$2
+  local SUBSET=${3:-""}
+
+  if [[ ! -s $META ]]
+  then
+    return 0
+  fi
+
+  if [[ -s $SUBSET ]] && grep -q -f $SUBSET $META
+  then
+    subset_meta $META $SUBSET
+  elif [[ -s "$SERIES.biosample.list" ]]
+  then
+    subset_meta $META $SERIES.biosample.list
+  else
+    >&2 echo "WARNING: No subset file provided, and no biosample list found; using the full metadata file $META"
   fi
 }
 
@@ -288,13 +322,16 @@ function make_util_files() {
   local SUBSET=${2:-""}
   local STATUS=1
 
-  if [[ -s $SERIES.accessions.tsv ]] 
-  then 
+  if [[ -s $SERIES.accessions.tsv ]]
+  then
     >&2 echo "WARNING: file $SERIES.accessions.tsv exists. This shouldn't normally happen. Overwriting the file.."
     rm $SERIES.accessions.tsv
   fi
 
-  
+  ## narrow down the sample list before looking up accessions, so samples outside the
+  ## requested subset (which may be missing from the metadata) don't abort the whole run
+  subset_sample_list $SERIES $SUBSET
+
   ## get sample, experiment, and run IDs for each sample from SRA metadata file
   if [[ $SERIES == GSE* ]]
   then
@@ -321,37 +358,22 @@ function make_util_files() {
   ## make few more useful metadata files
   make_run_relation_files $SERIES
 
-  ## finally, classify each run into 3 major types: 
+  ## finally, classify each run into 3 major types:
   ## 1) we have useable 10x paired-end files; 2) we need to get them from 10x BAM; 3) we need to get them from SRA
-  ## simultaneously, '$SERIES.urls.list' is generated listing all things that need to be downloaded 
-  if [[ -s "$SERIES.ena.tsv" ]]
+  ## simultaneously, '$SERIES.urls.list' is generated listing all things that need to be downloaded
+  if [[ ! -s "$SERIES.ena.tsv" && ! -s "$SERIES.sra.tsv" ]]
   then
-    if grep -q -f $SUBSET $SERIES.ena.tsv;
-    then
-      subset_meta $SERIES.ena.tsv $SUBSET
-    elif [[ -s "$SERIES.biosample.list" ]];
-    then
-      subset_meta $SERIES.ena.tsv $SERIES.biosample.list
-    else
-      >&2 echo "WARNING: No subset file provided, and no biosample list found; using the full metadata file $SERIES.ena.tsv"
-    fi
-    parse_ena_metadata.sh $SERIES > $SERIES.parsed.tsv
-  elif [[ -s "$SERIES.sra.tsv" ]]
-  then
-    if grep -q -f $SUBSET $SERIES.sra.tsv;
-    then
-      subset_meta $SERIES.sra.tsv $SUBSET
-    elif [[ -s "$SERIES.biosample.list" ]];
-    then
-      subset_meta $SERIES.sra.tsv $SERIES.biosample.list
-    else
-      >&2 echo "WARNING: No subset file provided, and no biosample list found; using the full metadata file $SERIES.sra.tsv"
-    fi
-    parse_sra_metadata.sh $SERIES > $SERIES.parsed.tsv
-  else
     >&2 echo "ERROR: No metadata file found for $SERIES!"
     exit 1
   fi
+
+  ## both tables are narrowed down and handed to the parser together: a run is
+  ## frequently listed in only one of them, and the species recorded in the
+  ## other is the only thing standing between us and an 'UNKNOWN'
+  subset_metadata_table $SERIES $SERIES.ena.tsv $SUBSET
+  subset_metadata_table $SERIES $SERIES.sra.tsv $SUBSET
+
+  parse_metadata.sh $SERIES > $SERIES.parsed.tsv
 }
 
 function process_geo() {
@@ -488,7 +510,7 @@ function main () {
   then
     >&2 echo "USAGE: collect_metadata.sh <series_id> [sample_list]"
     >&2 echo
-    >&2 echo "(requires curl_ena_metadata.sh and parse_ena_metadata.sh present in the same directory)" 
+    >&2 echo "(requires curl_ena_metadata.sh, curl_sra_metadata.sh and parse_metadata.sh present in the same directory)"
     exit 1
   fi
 
