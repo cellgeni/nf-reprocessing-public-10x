@@ -19,6 +19,14 @@ Read-length policy (compared per read type, across runs):
   * R1 length mismatches remain strict unless run-level JSON reports prove the
     same effective CB/UMI geometry, or --allow-r1-length-mismatch is set.
 
+Multi-part chunks: a single run/role may legitimately show up as several
+numbered files (e.g. bamtofastq splitting a large lane into
+..._I1_001.fastq.gz, ..._I1_002.fastq.gz, ...). These are one logical read
+stream, not separate runs, so they are kept together and renumbered 001, 002,
+... in the output rather than treated as an error. All parts of one
+(run, role) must share the same read length; a mismatch there raises an
+error since it indicates the chunks do not actually belong together.
+
 How runs are grouped from a flat file list: each input is split into a read-role
 token (R1/R2/R3/R4/I1/I2) and the surrounding "stem". A run is identified by
 (containing directory, stem), so this works whether the per-run outputs sit in
@@ -322,15 +330,29 @@ def build_plan(
     for r in recs:
         runs[(r.parent, r.stem)].append(r)
 
-    # One file per (run, role).
+    # A (run, role) may legitimately have more than one file: bamtofastq (and
+    # bcl2fastq) split a single lane/read-type into numbered chunks -
+    # <..>_R1_001.fastq.gz, _R1_002.fastq.gz, ... - when the read count is
+    # large. Cell Ranger treats these as one logical read stream, so sort
+    # each (run, role) group into a deterministic part order and carry all
+    # parts through, renumbering their "_00N" suffix in the output. All parts
+    # of one (run, role) must share the same read length, since they are
+    # slices of the same sequencing lane.
+    parts_by_run_role: Dict[Tuple[str, str], Dict[str, List[FileRec]]] = {}
     for key, members in runs.items():
         by_role: Dict[str, List[FileRec]] = defaultdict(list)
         for r in members:
             by_role[r.role].append(r)
         for role, files in by_role.items():
-            if len(files) > 1:
-                names = ", ".join(f.basename for f in files)
-                raise RenameError(f"Run {key[1] or Path(key[0]).name!r} has multiple {role} files: {names}")
+            files.sort(key=lambda f: natural_key(f.basename))
+            if len({f.length for f in files}) > 1:
+                names = ", ".join(f"{f.basename}={f.length}" for f in files)
+                raise RenameError(
+                    f"Run {key[1] or Path(key[0]).name!r} has multiple {role} files "
+                    f"with inconsistent read lengths (expected chunks of the same lane "
+                    f"to match): {names}"
+                )
+        parts_by_run_role[key] = by_role
 
     # Deterministic lane order; build human-friendly, unique run labels.
     ordered_keys = sorted(runs, key=lambda k: (natural_key(k[1]), natural_key(k[0])))
@@ -390,15 +412,21 @@ def build_plan(
             f"{role} biological read length differs across runs ({detail}); kept all {role} files because biological read length does not affect CB/UMI extraction"
         )
 
-    # Build assignments for the kept roles.
+    # Build assignments for the kept roles. Each (run, role) may carry
+    # several chunk parts (see above); renumber them 001, 002, ... in the
+    # output so multi-part runs don't collide on a single "_001" name.
     assignments: List[Assignment] = []
     for key in ordered_keys:
         lane = lanes[key]
-        for r in runs[key]:
-            if r.role in skipped_roles:
+        for role, files in parts_by_run_role[key].items():
+            if role in skipped_roles:
                 continue
-            out = f"{args.sample_id}_S{args.sample_index}_L{lane:0{LANE_WIDTH}d}_{r.role}_001.fastq.gz"
-            assignments.append(Assignment(rec=r, lane=lane, run_label=labels[key], output_name=out))
+            for part, r in enumerate(files, start=1):
+                out = (
+                    f"{args.sample_id}_S{args.sample_index}_L{lane:0{LANE_WIDTH}d}"
+                    f"_{r.role}_{part:03d}.fastq.gz"
+                )
+                assignments.append(Assignment(rec=r, lane=lane, run_label=labels[key], output_name=out))
 
     out_names = [a.output_name for a in assignments]
     dups = [n for n, c in Counter(out_names).items() if c > 1]
