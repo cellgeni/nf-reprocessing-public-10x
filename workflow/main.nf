@@ -5,6 +5,7 @@ include { STARSOLO10X as STARSOLO10X_HUMAN } from '../subworkflows/local/starsol
 include { STARSOLO10X as STARSOLO10X_MOUSE } from '../subworkflows/local/starsolo10x/'
 include { CELLRANGER_COUNT as CELLRANGER_COUNT_HUMAN } from '../modules/cellgeni/cellranger/count'
 include { CELLRANGER_COUNT as CELLRANGER_COUNT_MOUSE } from '../modules/cellgeni/cellranger/count'
+include { REPROCESS10X_MAPPINGQC } from '../modules/local/reprocess10x/mappingqc'
 
 workflow REPROCESS10X {
     take:
@@ -64,32 +65,15 @@ workflow REPROCESS10X {
     if (!metaonlyflag) {
         DOWNLOAD10X(
             FETCH10XMETA.out.links,
-            wl_basedir
+            wl_basedir,
+            no_infer_specie,
+            default_specie
         )
 
-        // Collect fastq files per sample
-        def unknown_values = [null, '', 'NULL', 'UNKNOWN']
-        def specie_map = [
-            human: 'Homo sapiens',
-            mouse: 'Mus musculus',
-        ]
+        // Species is already resolved per sample inside DOWNLOAD10X, where the
+        // whole links.tsv is in scope — a sample's runs often carry conflicting
+        // or missing annotations that cannot be settled one run at a time.
         resolved_fastqs = resolved_fastqs.mix(DOWNLOAD10X.out.fastq)
-            .map { meta, fastqs ->
-                def effective_specie
-                if (no_infer_specie) {
-                    effective_specie = default_specie ? specie_map.get(default_specie) : 'UNKNOWN'
-                } else {
-                    if (meta.specie in unknown_values) {
-                        effective_specie = default_specie ? specie_map.get(default_specie) : 'UNKNOWN'
-                        log.warn "Sample ${meta.id} (${meta.dataset_id}) has unknown species — using effective_specie='${effective_specie}'"
-                    } else if (meta.specie in specie_map.values()) {
-                        effective_specie = meta.specie
-                    } else {
-                        effective_specie = 'UNKNOWN'
-                    }
-                }
-                [meta + [specie: effective_specie], fastqs]
-            }
 
         // Group samples by specie
         fastqs = resolved_fastqs
@@ -101,7 +85,7 @@ workflow REPROCESS10X {
 
         fastqs.other
             .map { meta, _fastqs ->
-                log.warn "Sample ${meta.id} (${meta.dataset_id}) has unexpected species '${meta.specie}' — skipping STARsolo"
+                log.warn "Sample ${meta.id} (${meta.dataset_id}) has no usable species — skipping alignment"
                 [meta, _fastqs]
             }
         
@@ -124,14 +108,27 @@ workflow REPROCESS10X {
             STARSOLO10X_HUMAN.out.mapping,
             STARSOLO10X_MOUSE.out.mapping
         )
-        soloqc   = soloqc.mix(
-            STARSOLO10X_HUMAN.out.qc_stats,
-            STARSOLO10X_MOUSE.out.qc_stats
-        )
+
+        // Collect mapping QC stats once per dataset, over every species it
+        // holds: both aligner branches carry the same dataset id, so QC'ing them
+        // separately would have each publish its own <dataset>.solo_qc.tsv to
+        // the same path. dataset_id's group size is the dataset's alignable
+        // sample count, set in DOWNLOAD10X once species are resolved.
+        samples_by_dataset = starsolo
+            .map { meta, sample_dir ->
+                def dataset_meta = [id: meta.dataset_id.getGroupTarget()]
+                tuple( groupKey(dataset_meta, meta.dataset_id.getGroupSize()), sample_dir )
+            }
+            .groupTuple(sort: 'hash', remainder: true)
+
+        REPROCESS10X_MAPPINGQC(samples_by_dataset)
+
+        soloqc   = soloqc.mix(REPROCESS10X_MAPPINGQC.out.tsv)
         versions = versions
             .mix(
                 STARSOLO10X_HUMAN.out.versions,
-                STARSOLO10X_MOUSE.out.versions
+                STARSOLO10X_MOUSE.out.versions,
+                REPROCESS10X_MAPPINGQC.out.versions.first()
             )
     }
 
