@@ -46,6 +46,52 @@ FETCH10XMETA(
 )
 ```
 
+## Tests
+
+`tests/main.nf.test` runs the module against fourteen real datasets, chosen to cover
+every accession type and every download route the module can pick. See
+[the repository README](../../../README.md#tests) for how to run them.
+
+| Test | Dataset | Covers |
+|---|---|---|
+| ENA paired-end fastq | `GSE111360` | `ENAFQ`, several runs per sample |
+| ENA paired-end fastq — mouse | `GSE160513` | species other than human |
+| one run per sample | `GSE250130` | run count must equal sample count |
+| mixed ENA fastq and SRA | `GSE264508` | a series that needs both routes at once |
+| SRA archive only | `GSE117988` | `SRA` |
+| 10x BAM | `GSE274955` | `BAM` |
+| ArrayExpress SDRF | `E-MTAB-9221` | `ORIFQ`, ERS samples, `*.txt` output |
+| BioProject | `PRJNA511433` | SRS samples, no SOFT file |
+| family file without SRA relations | `GSE135325`, `GSE137444` | see below |
+| sample subsets | `GSE135325`, `GSE117988`, `E-MTAB-9221` | nothing outside the subset leaks through |
+| stub | `GSE111360` | the `stub:` block |
+
+The `relation-recovery` tests are regression tests for GEO series whose
+`family.soft` records `!Sample_relation = BioSample:` but no `!Sample_relation =
+SRA:` line. Those used to leave the sample list empty and fail the process with
+`No run list '<series>.run.list' found!`; the relations are now recovered from
+the SRA/ENA metadata tables instead.
+
+### What is asserted
+
+Snapshots cover the run, species, type and sample columns of `links.tsv`. The
+download URL column is deliberately left out: SDL and the SRA mirrors hand out
+URLs whose host, path and (for BAMs) signature change between calls, so
+snapshotting them would break the suite within days. It is checked for shape
+instead, alongside the sample accessions, the species (never `UNKNOWN`) and the
+download types each series is expected to resolve to.
+
+`links.tsv` has no header, so the [nft-csv](https://github.com/lukfor/nft-csv)
+plugin names its columns `C0`–`C4`:
+
+| Column | Contents |
+|---|---|
+| `C0` | run accession |
+| `C1` | species |
+| `C2` | download URL(s) — not snapshotted |
+| `C3` | download type: `ORIFQ`, `ENAFQ`, `BAM` or `SRA` |
+| `C4` | sample accession |
+
 ## License
 
 MIT
