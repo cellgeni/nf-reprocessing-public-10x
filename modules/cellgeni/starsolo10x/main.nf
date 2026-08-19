@@ -4,7 +4,7 @@
 
 process STARSOLO10X {
     tag "${meta.id}"
-    container "docker://quay.io/cellgeni/starsolo:v4.1"
+    container "docker://quay.io/cellgeni/starsolo:v4.2"
     
     input:
     tuple val(meta), path(fastqs, stageAs: "fastqs/*")
