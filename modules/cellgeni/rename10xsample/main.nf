@@ -7,7 +7,12 @@ process RENAME10XSAMPLE {
     container "quay.io/cellgeni/metacells-python:latest"
 
     input:
-    tuple val(meta), path(fastqs, stageAs: "fastqs/*")
+    // run_jsons are the per-run chemistry reports from RENAME10XRUN. They let this
+    // step check CB/UMI geometry across a sample's runs instead of re-deriving read
+    // lengths from a small head sample, which is what made runs of one sample look
+    // like they disagreed. Runs that never went through RENAME10XRUN (BAM-derived
+    // ones) simply contribute no JSON, so the list may be empty or partial.
+    tuple val(meta), path(fastqs, stageAs: "fastqs/*"), path(run_jsons, stageAs: "run_jsons/*")
 
     output:
     tuple val(meta), path("*_R*_001.fastq.gz"), emit: reads
@@ -16,10 +21,12 @@ process RENAME10XSAMPLE {
 
     script:
     def args = task.ext.args ?: ""
+    def run_jsons_arg = run_jsons ? "--run-jsons ${run_jsons}" : ""
     """
     rename_fastqs_recommended.py \\
         ${args} \\
         --fastqs ${fastqs} \\
+        ${run_jsons_arg} \\
         --sample-id ${meta.id} \\
         --outdir .
     cat <<-END_VERSIONS > versions.yml
