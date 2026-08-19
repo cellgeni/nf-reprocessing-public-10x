@@ -126,16 +126,29 @@ workflow DOWNLOAD10X {
     // keying on it would split them into separate groups that each produce a
     // STARsolo directory named after the sample — which then collide when
     // MAPPINGQC stages them side by side.
-    sample2rename = RENAME10XRUN.out.reads
-        .mix(REPROCESS10X_BAM2FASTQ.out.fastq)
-        .map { run_meta, fastq ->
+    // Each renamed run travels with the chemistry report that describes it, so the
+    // per-sample step can settle CB/UMI geometry from what run-level inference
+    // already decided rather than measuring read lengths again and disagreeing with
+    // it. BAM-derived runs never pass through RENAME10XRUN and so carry no report;
+    // they join with an empty list, which RENAME10XSAMPLE treats as "no metadata for
+    // this run" exactly as before.
+    runs_with_chemistry = RENAME10XRUN.out.reads
+        .join(RENAME10XRUN.out.chemistry, failOnMismatch: true, failOnDuplicate: true)
+        .mix(REPROCESS10X_BAM2FASTQ.out.fastq.map { run_meta, fastq -> tuple(run_meta, fastq, []) })
+
+    sample2rename = runs_with_chemistry
+        .map { run_meta, fastq, chemistry ->
             def sample_meta = [id: run_meta.sample_id.getGroupTarget(), dataset_id: run_meta.dataset_id]
             def run_count = run_meta.sample_id.getGroupSize()
-            tuple( groupKey(sample_meta, run_count), fastq, run_meta.specie )
+            tuple( groupKey(sample_meta, run_count), fastq, chemistry, run_meta.specie )
         }
         .groupTuple(sort: 'hash', remainder: true)
-        .map { sample_key, fastqlist, species ->
-            tuple( sample_key.getGroupTarget() + [specie: species.first()], fastqlist.flatten() )
+        .map { sample_key, fastqlist, chemistrylist, species ->
+            tuple(
+                sample_key.getGroupTarget() + [specie: species.first()],
+                fastqlist.flatten(),
+                chemistrylist.flatten()
+            )
         }
     RENAME10XSAMPLE(
         sample2rename
