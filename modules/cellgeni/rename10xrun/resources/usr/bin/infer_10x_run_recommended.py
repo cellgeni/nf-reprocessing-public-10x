@@ -18,6 +18,7 @@ import gzip
 import json
 import math
 import os
+import random
 import re
 import shutil
 import sys
@@ -155,6 +156,14 @@ GEX_TRUNCATED_UMI_LENGTHS_DEFAULT = {10}
 ATAC_BARCODE_LENGTHS = {16, 24}
 INDEX_LENGTHS = {6, 7, 8, 9, 10, 14, 16, 24}
 
+# Sampling is a uniform draw over a window at the start of the file rather than
+# the first N records. The head of an Illumina FASTQ is the worst part of it:
+# cycle-1 N-calls and the poorest tile are concentrated there, and because
+# whitelist matching is exact, an N in the barcode is a miss. Runs of real 10x
+# data were being rejected on a head sample scoring under 10% that scored over
+# 80% a million reads later. The draw is seeded so repeated runs agree.
+SAMPLE_SEED = 20260817
+
 
 class TenxRunError(RuntimeError):
     pass
@@ -167,8 +176,9 @@ class Match:
     label: str
     offset: int
     hits: int
-    sampled: int
+    sampled: int          # reads whose barcode slice was N-free, i.e. the denominator
     fraction: float
+    n_excluded: int = 0   # reads dropped from the denominator for containing an N
 
 
 @dataclass
@@ -184,6 +194,9 @@ class FastqInfo:
     max_length: int
     explicit_role: Optional[str]
     ordinal: Optional[int]
+    # Records read to build the sample. Length statistics are computed over all
+    # of these, while whitelist matching sees the `sampled_records` drawn from them.
+    scanned_records: int = 0
     matches: List[Match] = field(default_factory=list)
     inferred_role: Optional[str] = None
 
@@ -326,10 +339,27 @@ def parse_int_set(value: object, option_name: str) -> set[int]:
     return out
 
 
-def collect_fastq_info(paths: Sequence[Path], sample_records: int, ignore_duplicates: bool = True) -> Tuple[List[FastqInfo], Dict[str, List[str]]]:
+def collect_fastq_info(
+    paths: Sequence[Path],
+    sample_records: int,
+    ignore_duplicates: bool = True,
+    sample_window: int = 0,
+) -> Tuple[List[FastqInfo], Dict[str, List[str]]]:
+    """Draw a length profile and a sequence sample from each FASTQ.
+
+    Records are scanned from the start of the file up to `sample_window`, and
+    `sample_records` of them are kept by reservoir sampling (Algorithm R), so the
+    sample is spread across the whole window instead of being the first N reads.
+    Files shorter than the sample size still yield every record they have.
+
+    Length statistics use every scanned record; whitelist matching uses the
+    reservoir. Set `sample_window` to 0 (or below `sample_records`) to sample the
+    prefix only, which is the old behaviour.
+    """
     infos: List[FastqInfo] = []
     seq_samples: Dict[str, List[str]] = {}
     resolved: set[Path] = set()
+    window = max(sample_records, sample_window)
     for path in paths:
         real = path.resolve()
         if real in resolved:
@@ -339,13 +369,24 @@ def collect_fastq_info(paths: Sequence[Path], sample_records: int, ignore_duplic
                 continue
             raise TenxRunError(msg)
         resolved.add(real)
-        log("INFO", f"Sampling {path.name} (up to {sample_records:,} records)")
+        spread = f", spread over the first {window:,}" if window > sample_records else ""
+        log("INFO", f"Sampling {path.name} (up to {sample_records:,} records{spread})")
         counts: collections.Counter[int] = collections.Counter()
         seqs: List[str] = []
+        rng = random.Random(SAMPLE_SEED)
+        scanned = 0
         for _h, seq, _p, _q in iter_fastq_records(path):
             counts[len(seq)] += 1
-            seqs.append(seq)
-            if len(seqs) >= sample_records:
+            scanned += 1
+            if len(seqs) < sample_records:
+                seqs.append(seq)
+            else:
+                # Algorithm R: record `scanned` replaces a random reservoir slot
+                # with probability sample_records/scanned.
+                slot = rng.randrange(scanned)
+                if slot < sample_records:
+                    seqs[slot] = seq
+            if scanned >= window:
                 break
         if not seqs:
             raise TenxRunError(f"{path}: no FASTQ records sampled")
@@ -357,13 +398,15 @@ def collect_fastq_info(paths: Sequence[Path], sample_records: int, ignore_duplic
             sampled_records=len(seqs),
             length_counts=dict(counts),
             common_length=common_len,
-            common_fraction=common_n / len(seqs),
+            common_fraction=common_n / scanned,
             min_length=min(counts),
             max_length=max(counts),
             explicit_role=parse_explicit_role(path.name),
             ordinal=parse_ordinal(path.name),
+            scanned_records=scanned,
         )
-        log("INFO", f"  {path.name}: sampled {len(seqs):,} records, read length {common_len} bp ({common_n/len(seqs):.1%} constant)")
+        drawn = f"{len(seqs):,} of {scanned:,} scanned" if scanned > len(seqs) else f"{len(seqs):,} records"
+        log("INFO", f"  {path.name}: sampled {drawn}, read length {common_len} bp ({common_n/scanned:.1%} constant)")
         infos.append(info)
         seq_samples[info.path] = seqs
     return infos, seq_samples
@@ -464,43 +507,60 @@ def match_whitelists(infos: List[FastqInfo], seq_samples: Dict[str, List[str]], 
     if not available:
         raise TenxRunError(f"No known 10x whitelist files found in {store.whitelist_dir}")
 
-    # table_rows: list of (basename, chem_id, offset, hits, n) for the summary
-    table_rows: List[Tuple[str, str, int, int, int]] = []
+    # table_rows: list of (basename, chem_id, offset, hits, usable, n_excluded) for the summary
+    table_rows: List[Tuple[str, str, int, int, int, int]] = []
 
     for info in infos:
         seqs = seq_samples[info.path]
         n = len(seqs)
         # Pre-build barcode-slice counters once per unique (offset, cb_len) geometry.
+        # Reads whose barcode slice contains an N are counted separately and kept
+        # out of the denominator: matching is exact, so an N can only ever be a
+        # miss, and leaving them in makes a clean run look like a failed one.
         slice_counts: Dict[Tuple[int, int], collections.Counter] = {}
+        slice_ambiguous: Dict[Tuple[int, int], int] = {}
         for chem in available:
             for offset in chem.barcode_offsets:
                 end = offset + chem.cb_len
-                if info.common_length < end:
+                # Gate on the longest read seen, not the modal one, so a
+                # partly-trimmed barcode file is still assessed on the reads
+                # that are long enough to carry a barcode.
+                if info.max_length < end:
                     continue
                 key = (offset, chem.cb_len)
                 if key not in slice_counts:
-                    slice_counts[key] = collections.Counter(
-                        seq[offset:end] for seq in seqs if len(seq) >= end
-                    )
+                    counter: collections.Counter = collections.Counter()
+                    ambiguous = 0
+                    for seq in seqs:
+                        if len(seq) < end:
+                            continue
+                        bc = seq[offset:end]
+                        if "N" in bc:
+                            ambiguous += 1
+                        else:
+                            counter[bc] += 1
+                    slice_counts[key] = counter
+                    slice_ambiguous[key] = ambiguous
         log("INFO", f"Matching {info.basename} against {len(available)} whitelists")
         if not slice_counts:
-            table_rows.append((info.basename, "(too short for any chemistry)", 0, 0, n))
+            table_rows.append((info.basename, "(too short for any chemistry)", 0, 0, n, 0))
         for chem in available:
             wl = store.get(chem)
             for offset in chem.barcode_offsets:
-                end = offset + chem.cb_len
                 key = (offset, chem.cb_len)
                 if key not in slice_counts:
                     continue
                 counts = slice_counts[key]
-                hits = sum(counts[bc] for bc in counts if bc in wl)
-                frac = hits / n
-                table_rows.append((info.basename, chem.id, offset, hits, n))
-                if whitelist_passes(hits, n, frac, args):
-                    info.matches.append(Match(chem.id, chem.modality, chem.label, offset, hits, n, frac))
+                excluded = slice_ambiguous[key]
+                usable = sum(counts.values())
+                hits = sum(count for bc, count in counts.items() if bc in wl)
+                frac = hits / usable if usable else 0.0
+                table_rows.append((info.basename, chem.id, offset, hits, usable, excluded))
+                if whitelist_passes(hits, usable, frac, args):
+                    info.matches.append(Match(chem.id, chem.modality, chem.label, offset, hits, usable, frac, excluded))
                     if hits < args.min_whitelist_hits:
-                        req = whitelist_required_hits(n, args)
-                        log("WARN", f"  {info.basename}: low-depth whitelist match for {chem.id}: {hits}/{n} hits ({frac:.1%}); adaptive requirement={req}")
+                        req = whitelist_required_hits(usable, args)
+                        log("WARN", f"  {info.basename}: low-depth whitelist match for {chem.id}: {hits}/{usable} hits ({frac:.1%}); adaptive requirement={req}")
         info.matches.sort(key=lambda m: (m.fraction, m.hits, -m.offset), reverse=True)
         if info.matches:
             top = info.matches[0]
@@ -508,20 +568,22 @@ def match_whitelists(infos: List[FastqInfo], seq_samples: Dict[str, List[str]], 
         else:
             log("INFO", f"  {info.basename}: no chemistry matched thresholds")
 
-    # Print per-file whitelist hit table to stderr.
+    # Print per-file whitelist hit table to stderr. 'usable' is the sampled reads
+    # long enough to carry the barcode and free of Ns in it; 'N-drop' is how many
+    # were set aside for containing one.
     col_file = max(len(r[0]) for r in table_rows) if table_rows else 8
     col_chem = max(len(r[1]) for r in table_rows) if table_rows else 12
-    header = f"{'file':<{col_file}}  {'chemistry':<{col_chem}}  {'offset':>6}  {'hits':>8}  {'sampled':>8}  {'fraction':>8}"
+    header = f"{'file':<{col_file}}  {'chemistry':<{col_chem}}  {'offset':>6}  {'hits':>8}  {'usable':>8}  {'N-drop':>8}  {'fraction':>8}"
     sep = "-" * len(header)
     log("INFO", "Whitelist hit summary:")
     print(f"  {header}", file=sys.stderr)
     print(f"  {sep}", file=sys.stderr)
     prev_file = None
-    for basename, chem_id, offset, hits, n in table_rows:
-        frac = hits / n
+    for basename, chem_id, offset, hits, usable, excluded in table_rows:
+        frac = hits / usable if usable else 0.0
         file_col = basename if basename != prev_file else ""
         prev_file = basename
-        print(f"  {file_col:<{col_file}}  {chem_id:<{col_chem}}  {offset:>6}  {hits:>8}  {n:>8}  {frac:>7.1%}", file=sys.stderr)
+        print(f"  {file_col:<{col_file}}  {chem_id:<{col_chem}}  {offset:>6}  {hits:>8}  {usable:>8}  {excluded:>8}  {frac:>7.1%}", file=sys.stderr)
 
 
 def matches_for(info: FastqInfo, modality: Optional[str] = None) -> List[Match]:
@@ -611,10 +673,29 @@ def require_constant(
     min_fraction: float,
     args: argparse.Namespace,
     warnings: Optional[List[str]] = None,
+    cb_len: Optional[int] = None,
+    expected_len: Optional[int] = None,
 ) -> None:
+    """Require a technical read to be of constant length, tolerating light trimming.
+
+    Submitters frequently upload quality-trimmed FASTQs, which leaves the barcode
+    read varying by a few bases. That is not a reason to drop a run whose chemistry
+    is otherwise unambiguous, but the two ways a short read hurts are different and
+    are checked separately:
+
+      * A read shorter than `cb_len` has no extractable cell barcode. That breaks
+        the chemistry call itself, so it is the correctness bar and stays strict.
+      * A read that carries a full barcode but stops short of `expected_len`
+        (CB+UMI) still identifies its cell; STAR will discard it for want of a
+        complete UMI. That is lost yield, not wrong data, so it is reported rather
+        than treated as fatal.
+
+    Requiring the modal length to reach `expected_len` keeps this from silently
+    accepting a file whose real geometry is a different chemistry.
+    """
     if info.common_fraction >= min_fraction:
         return
-    msg = f"{info.basename}: {role} has variable lengths {info.length_counts}; unsafe to rename"
+    msg = f"{info.basename}: {role} has variable lengths {info.length_counts}"
     if args.ignore_variable_length or args.ignore_variable_barcode_length:
         note = msg + "; accepted because variable barcode/technical read length ignoring was enabled"
         if warnings is not None:
@@ -622,7 +703,37 @@ def require_constant(
         else:
             log("WARN", note)
         return
-    raise TenxRunError(msg)
+    if cb_len is not None and expected_len is not None:
+        with_barcode = fraction_with_length_at_least(info, cb_len)
+        with_umi = fraction_with_length_at_least(info, expected_len)
+        if info.common_length < expected_len:
+            raise TenxRunError(
+                f"{msg}; unsafe to rename: modal length {info.common_length} bp does not reach the "
+                f"{expected_len} bp this chemistry needs, so the layout call cannot be trusted"
+            )
+        if with_barcode < args.min_barcode_usable_fraction:
+            raise TenxRunError(
+                f"{msg}; unsafe to rename: only {with_barcode:.1%} of sampled reads are >= {cb_len} bp "
+                f"and so carry an extractable cell barcode (need "
+                f"{args.min_barcode_usable_fraction:.1%}). Lower --min-barcode-usable-fraction or pass "
+                f"--ignore-variable-barcode-length to override."
+            )
+        note = (
+            f"{msg}; accepted as quality-trimmed: modal length {info.common_length} bp reaches the "
+            f"expected {expected_len} bp and {with_barcode:.1%} of sampled reads carry a full "
+            f"{cb_len} bp cell barcode"
+        )
+        if with_umi < args.warn_barcode_umi_fraction:
+            note += (
+                f". Note that only {with_umi:.1%} reach {expected_len} bp, so STAR will discard "
+                f"roughly {1 - with_umi:.1%} of reads for an incomplete UMI"
+            )
+        if warnings is not None:
+            warnings.append(note)
+        else:
+            log("WARN", note)
+        return
+    raise TenxRunError(msg + "; unsafe to rename")
 
 
 
@@ -645,7 +756,8 @@ def require_biological_read_usable(info: FastqInfo, role: str, args: argparse.Na
     if usable_fraction < args.min_bio_usable_fraction:
         raise TenxRunError(
             f"{info.basename}: only {usable_fraction:.1%} sampled {role} records are "
-            f">= {args.min_bio_read_length} bp; required {args.min_bio_usable_fraction:.1%}"
+            f">= {args.min_bio_read_length} bp; required {args.min_bio_usable_fraction:.1%}. "
+            f"Lower --min-bio-usable-fraction to accept a more heavily trimmed biological read."
         )
     if info.common_fraction >= args.min_bio_common_fraction:
         return
@@ -777,7 +889,21 @@ def classify_gex(infos: List[FastqInfo], store: WhitelistStore, args: argparse.N
     match = best_match(barcode, "gex")
     assert match is not None
     chem = CHEM_BY_ID[match.chemistry_id]
-    require_constant(barcode, "GEX barcode read", args.min_barcode_common_fraction, args, warnings)
+    # A v1 barcode file holding the CB alone needs only cb_len; everything else
+    # carries CB+UMI in one read.
+    if chem.split_v1 and barcode.common_length == chem.cb_len:
+        expected_barcode_len = chem.cb_len
+    else:
+        expected_barcode_len = chem.cb_len + (gex_observed_umi_len(barcode, args) or 0)
+    require_constant(
+        barcode,
+        "GEX barcode read",
+        args.min_barcode_common_fraction,
+        args,
+        warnings,
+        cb_len=chem.cb_len,
+        expected_len=expected_barcode_len,
+    )
     roles: Dict[str, FastqInfo] = {}
     outputs: List[OutputEntry] = []
 
@@ -860,7 +986,15 @@ def classify_atac(infos: List[FastqInfo], store: WhitelistStore, args: argparse.
     match = best_match(barcode, "atac")
     assert match is not None
     chem = CHEM_BY_ID[match.chemistry_id]
-    require_constant(barcode, "ATAC barcode-index read", args.min_barcode_common_fraction, args, warnings)
+    require_constant(
+        barcode,
+        "ATAC barcode-index read",
+        args.min_barcode_common_fraction,
+        args,
+        warnings,
+        cb_len=match.offset + chem.cb_len,
+        expected_len=match.offset + chem.cb_len,
+    )
     if barcode.common_length == 24 and match.offset not in (0, 8):
         raise TenxRunError(f"{barcode.basename}: unexpected ATAC barcode offset {match.offset}")
 
@@ -1190,6 +1324,11 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--accept-modalities", choices=("gex", "atac", "both"), default="gex")
     p.add_argument("--prefer-gex", action="store_true", help="For a wrongly mixed GEX+ATAC invocation, emit only the separable GEX run")
     p.add_argument("--sample-records", type=int, default=200000)
+    p.add_argument("--sample-window", type=int, default=2000000,
+                   help="Scan up to this many records and draw --sample-records uniformly from them, "
+                        "instead of taking the first --sample-records reads. The head of a FASTQ "
+                        "concentrates cycle-1 N-calls and the worst tile, which makes real 10x runs "
+                        "look like whitelist failures. Set to 0 to sample the prefix only")
     p.add_argument("--min-whitelist-hits", type=int, default=1000)
     p.add_argument("--min-whitelist-hits-floor", type=int, default=3, help="Minimum absolute whitelist hits after adaptive low-depth scaling")
     p.add_argument("--min-whitelist-fraction", type=float, default=0.20)
@@ -1197,8 +1336,17 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--min-gex-r2-length", type=int, default=60)
     p.add_argument("--min-atac-genomic-read-length", type=int, default=40)
     p.add_argument("--min-barcode-common-fraction", type=float, default=0.98)
+    p.add_argument("--min-barcode-usable-fraction", type=float, default=0.90,
+                   help="When the barcode read is not of constant length, accept it anyway if at least "
+                        "this fraction of sampled reads still reach the full CB+UMI length and the modal "
+                        "length does too. Covers quality-trimmed submissions, which STAR handles via "
+                        "--soloBarcodeReadLength 0. Set to 1.0 to require constant length")
+    p.add_argument("--warn-barcode-umi-fraction", type=float, default=0.95,
+                   help="Warn when fewer than this fraction of sampled barcode reads reach the full "
+                        "CB+UMI length. Those reads still identify their cell but STAR discards them "
+                        "for an incomplete UMI, so this quantifies the yield lost to trimming")
     p.add_argument("--min-bio-common-fraction", type=float, default=0.90)
-    p.add_argument("--min-bio-usable-fraction", type=float, default=0.98, help="Minimum sampled fraction of biological reads that must be >= --min-bio-read-length")
+    p.add_argument("--min-bio-usable-fraction", type=float, default=0.85, help="Minimum sampled fraction of biological reads that must be >= --min-bio-read-length")
     p.add_argument("--allow-v1-umi-lengths", default="5,10")
     p.add_argument("--allow-gex-truncated-umi-lengths", default="10", help="Comma-separated observed UMI lengths allowed for known truncated GEX layouts; currently only applied to gex_3pv3_family")
     p.add_argument("--ignore-variable-length", "--ignore-variable-lengths", dest="ignore_variable_length", action="store_true", help="Warn instead of failing when selected FASTQ reads have variable lengths; false by default")
@@ -1241,7 +1389,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     stats: List[FastqInfo] = []
     try:
         log("INFO", f"Run {args.run_id}: sampling {len(args.fastqs)} FASTQ files")
-        stats, samples = collect_fastq_info(args.fastqs, args.sample_records, ignore_duplicates=args.ignore_duplicates)
+        stats, samples = collect_fastq_info(
+            args.fastqs,
+            args.sample_records,
+            ignore_duplicates=args.ignore_duplicates,
+            sample_window=args.sample_window,
+        )
         for s in stats:
             log("INFO", f"{s.basename}: len={s.common_length} ({s.common_fraction:.1%}), explicit={s.explicit_role}, ordinal={s.ordinal}, comp={s.compression}")
         store = WhitelistStore(args.whitelist_dir)
