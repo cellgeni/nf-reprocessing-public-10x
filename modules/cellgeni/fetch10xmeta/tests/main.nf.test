@@ -215,6 +215,45 @@ nextflow_process {
                 // over everything ENA offers
                 { assert links.columns.C4.every { it ==~ /^ERS\d+$/ } },
                 { assert links.columns.C3.unique() == ['ORIFQ'] },
+                // every one of these files is registered with the study, so the
+                // stale pub/databases/microarray/... spelling in the SDRF is
+                // refreshed rather than discarded
+                { assert links.columns.C2.every { !it.contains('/pub/databases/microarray/') } },
+                { assert links.columns.C2.every { it.contains('/biostudies/files/E-MTAB-9221/') } },
+                { assert snapshot(links.rows.collect { [it.C0, it.C1, it.C3, it.C4] }.sort()).match() }
+            )
+        }
+    }
+
+    test("ArrayExpress - SDRF fastq URIs the study does not register") {
+        tag "arrayexpress"
+        tag "bam"
+
+        // E-MTAB-8060 declares both a Comment[BAM_URI] for its registered ENA
+        // submission and three Comment[FASTQ_URI] columns per run pointing into
+        // the pre-BioStudies mirror at pub/databases/microarray/data/experiment/.
+        // Those fastq files still serve, but the study registers nothing except
+        // its idf and sdrf, so they are not study data and must not displace the
+        // BAM — which is exactly what they used to do, for all 15 runs, silently.
+        when {
+            process {
+                """
+                input[0] = [ [id:'E-MTAB-8060'], null ]
+                """
+            }
+        }
+
+        then {
+            def links = path(process.out.links[0][1]).csv(sep: '\t', header: false)
+            assertAll(
+                { assert process.success },
+                { assert process.out.versions },
+                { assert links.columnCount == 5 && links.rowCount > 0 },
+                { assert links.columns.C1.every { it != 'UNKNOWN' } },
+                { assert links.columns.C4.every { it ==~ /^ERS\d+$/ } },
+                { assert links.columns.C3.unique() == ['BAM'] },
+                { assert links.columns.C2.every { it.endsWith('.bam') } },
+                { assert links.columns.C2.every { !it.contains('/pub/databases/microarray/') } },
                 { assert snapshot(links.rows.collect { [it.C0, it.C1, it.C3, it.C4] }.sort()).match() }
             )
         }

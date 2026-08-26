@@ -15,7 +15,8 @@
 #
 # Download location is picked by this order of preference:
 #
-#    1. ArrayExpress submitter fastq  (sdrf.txt, E-MTAB series only)
+#    1. ArrayExpress submitter fastq  (sdrf.txt, E-MTAB series only, and only
+#                                      files the study actually registers)
 #    2. ENA paired-end fastq          (ena.tsv col 11, strict _1/_2 naming)
 #    3. ENA submitter fastq           (ena.tsv col 12, when no BAM is offered)
 #    4. ENA submitter BAM             (ena.tsv col 12)
@@ -31,8 +32,8 @@
 # reach the network here at all.
 #
 # Usage: parse_metadata.sh <series_id>
-#   reads  <series>.run.list and whichever of <series>.ena.tsv, <series>.sra.tsv
-#          and <series>.sdrf.txt exist
+#   reads  <series>.run.list and whichever of <series>.ena.tsv, <series>.sra.tsv,
+#          <series>.sdrf.txt and <series>.aefiles.list exist
 #   writes <series>.urls.list
 #   prints run <TAB> species <TAB> location <TAB> type
 
@@ -115,9 +116,26 @@ sdl_query() {
 # runs of tabs as a single separator, which would silently shift the columns.
 join_tables() {
   awk -F'\t' -v OFS='\t' \
-      -v RUNS="$SERIES.run.list" -v ENA="$SERIES.ena.tsv" \
-      -v SRA="$SERIES.sra.tsv"   -v SDRF="$SERIES.sdrf.txt" '
+      -v RUNS="$SERIES.run.list"       -v ENA="$SERIES.ena.tsv" \
+      -v SRA="$SERIES.sra.tsv"         -v SDRF="$SERIES.sdrf.txt" \
+      -v AEFILES="$SERIES.aefiles.list" \
+      -v AEBASE="https://www.ebi.ac.uk/biostudies/files/$SERIES/" \
+      -v AEMIRROR="/pub/databases/(microarray|arrayexpress)/data/experiment/" '
     function dash(s) { return (s == "" ? "-" : s) }
+
+    # Add the fastq URLs of one SDRF row to a run. A run can span several rows
+    # — one per lane, or one per read file — so these accumulate rather than
+    # overwrite, and ae_seen keeps a URL repeated across rows from being listed
+    # (and downloaded) twice.
+    function ae_add(r, list,   k, u, i) {
+      if (list == "") return
+      k = split(list, u, ";")
+      for (i = 1; i <= k; i++) {
+        if ((r SUBSEP u[i]) in ae_seen) continue
+        ae_seen[r SUBSEP u[i]] = 1
+        ae_fq[r] = (ae_fq[r] == "" ? u[i] : ae_fq[r] ";" u[i])
+      }
+    }
 
     # run list first, so the ArrayExpress pass below knows which runs to look for
     FILENAME == RUNS { if ($1 != "") { order[++n] = $1; runs[$1] = 1 } next }
@@ -128,14 +146,49 @@ join_tables() {
     # sra.tsv: 1=run 10=archive url 29=species
     FILENAME == SRA { sra_sp[$1]=$29; sra_url[$1]=$10; next }
 
-    # sdrf.txt: submitter fastq URLs sit in arbitrary columns of the run row
+    # the files the study registers, one base name per line, absent when
+    # collect_metadata.sh could not reach the BioStudies API
+    FILENAME == AEFILES { if ($1 != "") { aefiles[$1] = 1; have_aefiles = 1 } next }
+
+    # sdrf.txt: submitter fastq URLs sit in arbitrary columns of the run row.
+    #
+    # A URI under the pre-BioStudies mirror at
+    # ftp.ebi.ac.uk/pub/databases/microarray/data/experiment/ is checked against
+    # the files the study registers before it is believed, because that spelling
+    # means two different things. E-MTAB-8060 and E-MTAB-9221 look identical
+    # here — both point every Comment[FASTQ_URI] at the mirror, and both also
+    # declare a Comment[BAM_URI] for a registered ENA submission — yet:
+    #
+    #   * E-MTAB-9221 registers all 40 of those fastq files. The URI is a stale
+    #     spelling of a real study file, so it is kept and the URL refreshed.
+    #   * E-MTAB-8060 registers none of its 36. The study holds only the idf and
+    #     the sdrf; the reads exist solely on the unmaintained mirror, and the
+    #     real submission is the ENA BAM. Taking those URIs at face value
+    #     discarded the BAM for all 15 runs, silently, because rule 1 never
+    #     looks at what it is outranking. Dropping them leaves ae_fq empty, and
+    #     the run falls through to the ENA table and picks the BAM up.
+    #
+    # Anything not on the mirror is left exactly as the SDRF wrote it, and so is
+    # everything when the file list is missing: an unreachable API should not be
+    # able to reroute a whole series to its BAMs.
     FILENAME == SDRF {
-      fq = ""
-      for (i = 1; i <= NF; i++)
-        if ($i ~ /ftp:\/\/.*\.f.*q/) fq = (fq == "" ? $i : fq ";" $i)
-      if (fq == "") next
-      for (r in runs)
-        if ($0 ~ ("(^|[^A-Za-z0-9])" r "([^A-Za-z0-9]|$)")) ae_fq[r] = fq
+      fq = ""; unreg = ""
+      for (i = 1; i <= NF; i++) {
+        if ($i !~ /ftp:\/\/.*\.f.*q/) continue
+        if (!have_aefiles || $i !~ AEMIRROR) { fq = (fq == "" ? $i : fq ";" $i); continue }
+        base = $i
+        sub(/.*\//, "", base)
+        if (base in aefiles)
+          fq = (fq == "" ? AEBASE base : fq ";" AEBASE base)
+        else
+          unreg = (unreg == "" ? $i : unreg ";" $i)
+      }
+      if (fq == "" && unreg == "") next
+      for (r in runs) {
+        if ($0 !~ ("(^|[^A-Za-z0-9])" r "([^A-Za-z0-9]|$)")) continue
+        ae_add(r, fq)
+        if (unreg != "") ae_unreg[r] += split(unreg, discarded, ";")
+      }
       next
     }
 
@@ -161,6 +214,14 @@ join_tables() {
           if (parts[i] ~ /\.bam/ && parts[i] !~ /\.bai/)
             oribam = (oribam == "" ? parts[i] : oribam ";" parts[i])
 
+        # say so out loud: the whole reason E-MTAB-8060 went unnoticed is that
+        # the substitution left no trace anywhere
+        if (ae_unreg[r] > 0)
+          print "WARNING: run " r ": ignored " ae_unreg[r] \
+                " SDRF fastq URI(s) naming files the study does not register" \
+                (ae_fq[r] == "" ? "; using the ENA table instead" : "") \
+                > "/dev/stderr"
+
         loc = ""; type = ""
         if (ae_fq[r] != "")                 { type = "ORIFQ"; loc = ae_fq[r] }
         else if (enagz != "")               { type = "ENAFQ"; loc = enagz }
@@ -172,6 +233,7 @@ join_tables() {
       }
     }
   ' "$SERIES.run.list" \
+    $( [[ -s $SERIES.aefiles.list ]] && echo "$SERIES.aefiles.list" ) \
     $( [[ -s $SERIES.ena.tsv  ]] && echo "$SERIES.ena.tsv" ) \
     $( [[ -s $SERIES.sra.tsv  ]] && echo "$SERIES.sra.tsv" ) \
     $( [[ -s $SERIES.sdrf.txt ]] && echo "$SERIES.sdrf.txt" )

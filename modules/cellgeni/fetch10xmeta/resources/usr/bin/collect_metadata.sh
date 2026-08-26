@@ -30,6 +30,65 @@ function download_sdrf_idf_files() {
   fi
 }
 
+## list the files BioStudies actually holds for the series, one name per line.
+##
+## The SDRF's Comment[FASTQ_URI] columns cannot be trusted on their own. Some
+## series spell them against ftp.ebi.ac.uk/pub/databases/microarray/data/
+## experiment/, the pre-BioStudies mirror, and that spelling means two different
+## things: for E-MTAB-9221 all 40 files are registered and merely have a stale
+## URL, while for E-MTAB-8060 the mirror is the only place they exist -- the
+## study itself registers nothing but the idf and the sdrf, and its reads are an
+## ENA BAM submission. parse_metadata.sh needs to tell those apart, and this
+## list is how: a URI naming a file that is not here is not a study data file.
+##
+## The endpoint pages, and quietly: with no explicit limit it returns the first
+## 25 of however many there are, which for E-MTAB-9221 would have declared 15 of
+## its 40 registered fastq files unregistered. Hence the paging on
+## pagination.total rather than a single large limit.
+##
+## A failure to fetch the list is not fatal. It leaves no file behind, and
+## parse_metadata.sh falls back to trusting the SDRF as it always did, rather
+## than letting a blip at the API reroute a whole series to its BAMs.
+function download_ae_file_list() {
+  local SERIES=$1
+  local LIMIT=500
+  local OFFSET=0
+  local TOTAL=1
+
+  rm -f $SERIES.aefiles.list $SERIES.aefiles.json
+
+  while (( OFFSET < TOTAL ))
+  do
+    if ! curl -sS --fail --retry 3 --retry-delay 2 --retry-connrefused --max-time 120 \
+         "https://www.ebi.ac.uk/biostudies/api/v1/studies/$SERIES/files?limit=$LIMIT&offset=$OFFSET" \
+         -o $SERIES.aefiles.json
+    then
+      >&2 echo "WARNING: Could not fetch the BioStudies file list for $SERIES; SDRF fastq URIs will be used unchecked."
+      rm -f $SERIES.aefiles.json $SERIES.aefiles.list
+      return 0
+    fi
+
+    TOTAL=$(jq -r '.pagination.total // 0' $SERIES.aefiles.json 2>/dev/null)
+    [[ $TOTAL =~ ^[0-9]+$ ]] || TOTAL=0
+
+    ## 'path' carries any subdirectory; the SDRF URIs are matched on base name
+    jq -r '.items[]? | select((.isDirectory // "false") != "true") | .path' \
+       $SERIES.aefiles.json 2>/dev/null | sed 's|.*/||' | grep . >> $SERIES.aefiles.list
+
+    OFFSET=$(( OFFSET + LIMIT ))
+  done
+  rm -f $SERIES.aefiles.json
+
+  if [[ -s $SERIES.aefiles.list ]]
+  then
+    sort -u -o $SERIES.aefiles.list $SERIES.aefiles.list
+    >&2 echo "NOTE: BioStudies registers $(wc -l < $SERIES.aefiles.list) file(s) for $SERIES."
+  else
+    >&2 echo "WARNING: BioStudies lists no files for $SERIES; SDRF fastq URIs will be used unchecked."
+    rm -f $SERIES.aefiles.list
+  fi
+}
+
 ## derive the sample and biosample lists from the relation table. '-' marks a
 ## relation we do not have; it must never reach the lists, both because it is
 ## not an ID anyone can look up and because a lone '-' used as a grep -f
@@ -658,7 +717,12 @@ function process_arrayexpress {
 
   ## download the SDRF and IDF files from ArrayExpress
   download_sdrf_idf_files $SERIES
-  
+
+  ## record which files the study actually registers, so that parse_metadata.sh
+  ## can tell a stale URL for a real file from a URI for a file that is not
+  ## part of the study at all
+  download_ae_file_list $SERIES
+
   ## parse the SDRF file to get the project and sample IDs
   parse_sdrf_idf $SERIES
 
