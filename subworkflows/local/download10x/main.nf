@@ -42,6 +42,49 @@ def resolve_specie(sample_id, dataset_id, run_species, no_infer_specie, default_
     return known[0]
 }
 
+// Turn the per-run chemistry reports into the value Cell Ranger's --chemistry expects,
+// or null to leave it on auto-detection.
+//
+// Cell Ranger re-detects chemistry from the FASTQs, and for Multiome gene expression it
+// detects ARC-v1 and then refuses to proceed unless the chemistry was named explicitly —
+// so a whole Multiome dataset fails at the aligner even though run-level inference had
+// already identified it correctly. Passing what we inferred settles that.
+//
+// Only chemistries that are both called unambiguously by RENAME10XRUN and not already
+// handled by --chemistry=auto are mapped. gex_3pv2_or_5pv1v2 and gex_3pv3_family are
+// deliberately absent: infer_10x_run marks them 'layout_only' because one whitelist
+// covers several chemistries, and auto resolves them correctly today. Forcing a guess
+// there would risk the samples that currently work in exchange for nothing.
+def resolve_cellranger_chemistry(sample_id, chemistry_files) {
+    def cellranger_chemistry = [ 'gex_multiome_arc_v1': 'ARC-v1' ]
+
+    def chemistry_ids = chemistry_files
+        .findAll { report -> report }
+        .collect { report ->
+            try {
+                new groovy.json.JsonSlurper().parseText(report.text)
+            } catch (Exception err) {
+                log.warn "Sample ${sample_id}: could not read chemistry report ${report.name} (${err.message})"
+                return null
+            }
+        }
+        .findAll { report -> report && report.ok && report.chemistry_id }
+        .collect { report -> report.chemistry_id }
+        .unique()
+
+    // Runs that disagree are not safe to force onto one chemistry, and a sample with no
+    // usable report (every BAM-derived one, for instance) has nothing to say either way.
+    if (chemistry_ids.size() > 1) {
+        log.warn "Sample ${sample_id} has runs with differing chemistries ${chemistry_ids} — leaving Cell Ranger on auto-detection"
+        return null
+    }
+    if (chemistry_ids.isEmpty()) {
+        return null
+    }
+
+    return cellranger_chemistry[chemistry_ids[0]]
+}
+
 workflow DOWNLOAD10X {
 
     take:
@@ -144,10 +187,24 @@ workflow DOWNLOAD10X {
         }
         .groupTuple(sort: 'hash', remainder: true)
         .map { sample_key, fastqlist, chemistrylist, species ->
+            def sample_meta = sample_key.getGroupTarget() + [specie: species.first()]
+            def reports     = chemistrylist.flatten()
+
+            // The key is added only when there is a chemistry worth forcing, so the sample
+            // meta is unchanged for everything that already aligns correctly and their
+            // RENAME10XSAMPLE and STARsolo tasks stay cached. (Cell Ranger itself re-runs
+            // for every sample after this change regardless: Nextflow folds a process's
+            // own source text into its task hash, so editing the module invalidates it.)
+            def chemistry = resolve_cellranger_chemistry(sample_meta.id, reports)
+            if (chemistry) {
+                log.info "Sample ${sample_meta.id}: passing --chemistry=${chemistry} to Cell Ranger from run-level inference"
+                sample_meta = sample_meta + [chemistry: chemistry]
+            }
+
             tuple(
-                sample_key.getGroupTarget() + [specie: species.first()],
+                sample_meta,
                 fastqlist.flatten(),
-                chemistrylist.flatten()
+                reports
             )
         }
     RENAME10XSAMPLE(
