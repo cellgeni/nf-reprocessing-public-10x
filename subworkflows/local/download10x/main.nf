@@ -42,22 +42,10 @@ def resolve_specie(sample_id, dataset_id, run_species, no_infer_specie, default_
     return known[0]
 }
 
-// Turn the per-run chemistry reports into the value Cell Ranger's --chemistry expects,
-// or null to leave it on auto-detection.
-//
-// Cell Ranger re-detects chemistry from the FASTQs, and for Multiome gene expression it
-// detects ARC-v1 and then refuses to proceed unless the chemistry was named explicitly —
-// so a whole Multiome dataset fails at the aligner even though run-level inference had
-// already identified it correctly. Passing what we inferred settles that.
-//
-// Only chemistries that are both called unambiguously by RENAME10XRUN and not already
-// handled by --chemistry=auto are mapped. gex_3pv2_or_5pv1v2 and gex_3pv3_family are
-// deliberately absent: infer_10x_run marks them 'layout_only' because one whitelist
-// covers several chemistries, and auto resolves them correctly today. Forcing a guess
-// there would risk the samples that currently work in exchange for nothing.
-def resolve_cellranger_chemistry(sample_id, chemistry_files) {
-    def cellranger_chemistry = [ 'gex_multiome_arc_v1': 'ARC-v1' ]
-
+// Settle one chemistry for a sample from the per-run reports RENAME10XRUN wrote, or
+// null when there is nothing to force. Both aligners take their chemistry from this
+// single answer, so they can never be handed contradicting ones.
+def resolve_run_chemistry(sample_id, chemistry_files) {
     def chemistry_ids = chemistry_files
         .findAll { report -> report }
         .collect { report ->
@@ -75,14 +63,64 @@ def resolve_cellranger_chemistry(sample_id, chemistry_files) {
     // Runs that disagree are not safe to force onto one chemistry, and a sample with no
     // usable report (every BAM-derived one, for instance) has nothing to say either way.
     if (chemistry_ids.size() > 1) {
-        log.warn "Sample ${sample_id} has runs with differing chemistries ${chemistry_ids} — leaving Cell Ranger on auto-detection"
-        return null
-    }
-    if (chemistry_ids.isEmpty()) {
+        log.warn "Sample ${sample_id} has runs with differing chemistries ${chemistry_ids} — leaving chemistry to the aligners' own detection"
         return null
     }
 
-    return cellranger_chemistry[chemistry_ids[0]]
+    return chemistry_ids.isEmpty() ? null : chemistry_ids[0]
+}
+
+// Turn an inferred chemistry id into the value Cell Ranger's --chemistry expects,
+// or null to leave it on auto-detection.
+//
+// Cell Ranger re-detects chemistry from the FASTQs, and for Multiome gene expression it
+// detects ARC-v1 and then refuses to proceed unless the chemistry was named explicitly —
+// so a whole Multiome dataset fails at the aligner even though run-level inference had
+// already identified it correctly. Passing what we inferred settles that.
+//
+// Only chemistries that are both called unambiguously by RENAME10XRUN and not already
+// handled by --chemistry=auto are mapped. gex_3pv2_or_5pv1v2 and gex_3pv3_family are
+// deliberately absent: infer_10x_run marks them 'layout_only' because one whitelist
+// covers several chemistries, and auto resolves them correctly today. Forcing a guess
+// there would risk the samples that currently work in exchange for nothing.
+def resolve_cellranger_chemistry(chemistry_id) {
+    def cellranger_chemistry = [ 'gex_multiome_arc_v1': 'ARC-v1' ]
+
+    return chemistry_id ? cellranger_chemistry[chemistry_id] : null
+}
+
+// Turn an inferred chemistry id into the value `starsolo 10x --wl` expects, or null to
+// leave the wrapper to detect the whitelist itself.
+//
+// The wrapper accepts infer_10x_run.py's own chemistry ids, so a resolved id goes
+// straight through. Unlike Cell Ranger, the layout_only ids are safe to pass here: all
+// --wl decides is the whitelist and the CB/UMI geometry, and the wrapper derives that
+// geometry from the whitelist file alone — so a forced id gives exactly what its own
+// detection would have given, minus the detection. What that avoids is the failure mode:
+// the wrapper matches barcodes from a 200k subsample and aborts when no whitelist clears
+// its threshold, on data that matched a whitelist perfectly well at run level.
+//
+// ATAC ids are rejected by the wrapper (`starsolo 10x` is gene expression only), so they
+// are dropped here rather than turned into a task that dies on its first line.
+def resolve_starsolo_chemistry(sample_id, chemistry_id) {
+    def starsolo_chemistries = [
+        'gex_3pv1',
+        'gex_3pv2_or_5pv1v2',
+        'gex_3pv3_family',
+        'gex_3pv4_gemx',
+        'gex_5pv3_gemx',
+        'gex_multiome_arc_v1',
+    ]
+
+    if (!chemistry_id) {
+        return null
+    }
+    if (!(chemistry_id in starsolo_chemistries)) {
+        log.warn "Sample ${sample_id} was called as '${chemistry_id}', which `starsolo 10x --wl` does not accept — leaving STARsolo to detect the whitelist"
+        return null
+    }
+
+    return chemistry_id
 }
 
 workflow DOWNLOAD10X {
@@ -190,15 +228,26 @@ workflow DOWNLOAD10X {
             def sample_meta = sample_key.getGroupTarget() + [specie: species.first()]
             def reports     = chemistrylist.flatten()
 
-            // The key is added only when there is a chemistry worth forcing, so the sample
-            // meta is unchanged for everything that already aligns correctly and their
-            // RENAME10XSAMPLE and STARsolo tasks stay cached. (Cell Ranger itself re-runs
-            // for every sample after this change regardless: Nextflow folds a process's
-            // own source text into its task hash, so editing the module invalidates it.)
-            def chemistry = resolve_cellranger_chemistry(sample_meta.id, reports)
-            if (chemistry) {
-                log.info "Sample ${sample_meta.id}: passing --chemistry=${chemistry} to Cell Ranger from run-level inference"
-                sample_meta = sample_meta + [chemistry: chemistry]
+            // Both aligner keys are added here, where the run reports are in scope, and
+            // each is added only when inference actually decided something: a sample with
+            // no usable report keeps the meta it always had. Note that `wl` does get set
+            // for nearly every FASTQ/SRA-derived sample, which puts a new value in
+            // RENAME10XSAMPLE's task hash — those tasks re-run once on the next -resume
+            // even though renaming itself is unaffected by chemistry. (The aligners re-run
+            // regardless: Nextflow folds a process's own source text into its task hash,
+            // so editing either module invalidates it.)
+            def chemistry_id = resolve_run_chemistry(sample_meta.id, reports)
+
+            def cr_chemistry = resolve_cellranger_chemistry(chemistry_id)
+            if (cr_chemistry) {
+                log.info "Sample ${sample_meta.id}: passing --chemistry=${cr_chemistry} to Cell Ranger from run-level inference"
+                sample_meta = sample_meta + [chemistry: cr_chemistry]
+            }
+
+            def starsolo_chemistry = resolve_starsolo_chemistry(sample_meta.id, chemistry_id)
+            if (starsolo_chemistry) {
+                log.info "Sample ${sample_meta.id}: passing --wl ${starsolo_chemistry} to STARsolo from run-level inference"
+                sample_meta = sample_meta + [wl: starsolo_chemistry]
             }
 
             tuple(
