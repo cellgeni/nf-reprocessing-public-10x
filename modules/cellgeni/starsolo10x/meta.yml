@@ -25,7 +25,7 @@ tools:
 input:
 - - meta:
       type: "map"
-      description: "Map with sample-level metadata. Must contain key 'id' with the sample accession.\ne.g. [ id:'SRR12345678' ]\n"
+      description: "Map with sample-level metadata. Must contain key 'id' with the sample accession.\nOptional key 'wl' names the 10x chemistry (a chemistry id such as 'gex_3pv3_family'):\nwhen present it is passed as 'starsolo 10x --wl', together with '--skip-length-checks',\nso the whitelist and CB/UMI geometry come from upstream inference instead of being\nre-detected. Omit it to let the wrapper detect chemistry and validate read lengths itself.\ne.g. [ id:'SRR12345678', wl:'gex_3pv3_family' ]\n"
   - fastqs:
       type: "file"
       description: "FASTQ files (gzipped) for the sample. Staged under fastqs/."
@@ -53,5 +53,5 @@ authors:
   - "@claptar"
 maintainers:
   - "@claptar"
-version: "0.0.2"
+version: "0.0.4"
 license: "MIT"
