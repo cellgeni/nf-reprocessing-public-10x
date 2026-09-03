@@ -71,6 +71,21 @@ def unwrapGroupKeys(Map meta) {
     }
 }
 
+// Sample metadata as one row of an aligner index: a fixed set of keys in a fixed order.
+// The index writes its header from the first record and then each record's own fields in
+// order, so a sample missing a key emits a short row under a header that has the column.
+// The chemistry keys are exactly that case — they are set upstream only for samples whose
+// chemistry run-level inference could settle.
+def alignerIndexRow(Map meta) {
+    [
+        id        : meta.id,
+        dataset_id: meta.dataset_id,
+        specie    : meta.specie,
+        chemistry : meta.chemistry ?: '',  // Cell Ranger --chemistry
+        wl        : meta.wl ?: '',         // STARsolo --wl
+    ]
+}
+
 workflow {
     main:
     // Validate input parameters and show help if needed
@@ -157,9 +172,9 @@ workflow {
     fastq          = REPROCESS10X.out.fastq
         .flatMap { meta, fastqs -> fastqs.collect { file -> [meta, file] } }
         .map { meta, fastq -> unwrapGroupKeys(meta) + [path: fastq] }
-    starsolo   = REPROCESS10X.out.starsolo.map { meta, starsolo -> unwrapGroupKeys(meta) + [path: starsolo] }
+    starsolo   = REPROCESS10X.out.starsolo.map { meta, starsolo -> alignerIndexRow(unwrapGroupKeys(meta)) + [path: starsolo] }
     soloqc     = REPROCESS10X.out.soloqc.map { meta, soloqc -> meta.getGroupTarget() + [path: soloqc] }
-    cellranger = REPROCESS10X.out.cellranger.map { meta, cellranger -> unwrapGroupKeys(meta) + [path: cellranger] }
+    cellranger = REPROCESS10X.out.cellranger.map { meta, cellranger -> alignerIndexRow(unwrapGroupKeys(meta)) + [path: cellranger] }
 }
 
 output {
