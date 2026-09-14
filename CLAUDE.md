@@ -20,13 +20,17 @@ any non-trivial change:
   against the `nf-work` dirs where they survive (batches 1-5 were deleted 2026-09-14),
   known-good regression accessions, and open issues found
   but not fixed. Also `references/run-index.md` — every run's name, session, archive path and
-  post-mortem URL, so none of that has to be hunted for. Supersedes the old `docs/agent_debug.md`,
+  failure counts, so none of that has to be hunted for. Supersedes the old `docs/agent_debug.md`,
   which stays untracked and local.
 - [docs/](docs/) — the user-facing knowledge base, tracked and browsable on GitHub:
   [`archive-pathologies.md`](docs/archive-pathologies.md) (per-accession defects found in public
   submissions, and the separate list of correctly-labelled data we rejected late),
   [`reporting-upstream.md`](docs/reporting-upstream.md) (how to report one to GEO/SRA/ENA),
-  [`failure-modes.md`](docs/failure-modes.md) (exit codes, baseline distribution, open problems).
+  [`failure-modes.md`](docs/failure-modes.md) (exit codes, baseline distribution, open problems),
+  [`post-mortems.md`](docs/post-mortems.md) (every published run write-up and its link — the
+  reports go out as Claude Artifacts, browser-readable, and this file is where the URLs are
+  tracked; read a link from here rather than listing artifacts, and add one here when you
+  publish).
 - [docs/10x_chemistry_reference.md](docs/10x_chemistry_reference.md) — the chemistry/geometry
   table the inference scripts implement: which whitelist means which chemistry, what is
   `layout_only` vs unique, and which layouts (ATAC, feature-barcode, V(D)J, Flex) must be

@@ -60,11 +60,12 @@ Four rules override everything below.
 | **verify** | `verify.md` | before believing any claim about read structure, chemistry or a guard |
 | **report** | `report.md` | the answer is going to a person, not just the terminal |
 | **compare** | `known-issues.md` | is this run's profile normal, and is this bug already known |
-| **look up** | `run-index.md` | which run was batch N, where is its evidence archived, is there a post-mortem |
+| **look up** | `run-index.md` | which run was batch N, where is its evidence archived, is there a post-mortem — and `docs/post-mortems.md` for its link |
 
 | Signal | Go to |
 |---|---|
-| "where is the batch-N post-mortem", "which run was batch N" | `run-index.md` — do not go listing artifacts |
+| "where is the batch-N post-mortem", "send me the link" | `docs/post-mortems.md` — do not go listing artifacts |
+| "which run was batch N", "where is its evidence" | `run-index.md` |
 | "triage batch N", "what failed in the last run" | §2, then §3 |
 | a run name (`spontaneous_ampere`) or an LSF job id | `data-map.md §history` |
 | an `nf-work/<hh>/<hash>` path | `verify.md §walkback` |
@@ -159,12 +160,13 @@ Relay the headline findings in the chat reply as well as linking the page.
 | `references/verify.md` | work-dir probes, guards and thresholds, regression accessions |
 | `references/report.md` | the Artifact post-mortem |
 | `references/known-issues.md` | baseline distributions, per-batch history, open bugs |
-| `references/run-index.md` | every run: name, session, archive path, post-mortem URL |
+| `references/run-index.md` | every run: name, session, failure counts, archive path |
 
 Related, outside this skill: `CLAUDE.md` for the pipeline architecture, and `docs/` for the
 user-facing knowledge base — `10x_chemistry_reference.md` (what each whitelist means and which
 layouts must be rejected), `archive-pathologies.md`, `reporting-upstream.md`,
-`failure-modes.md`.
+`failure-modes.md`, and `post-mortems.md` — the index of record for every published report's
+link, the one place to read a URL from or write a new one to.
 
 ## 7. Archive the run when you are done
 

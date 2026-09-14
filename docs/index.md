@@ -16,6 +16,7 @@ README cannot: what public data does when you run it at scale.
 | [Archive pathologies](archive-pathologies.md) | A dataset failed and you want to know whether it is a known problem, or you are about to conclude that a public submission is broken |
 | [Reporting upstream](reporting-upstream.md) | You have confirmed a defect in a public submission and want to send it to GEO, SRA, ENA or ArrayExpress |
 | [Failure modes](failure-modes.md) | You want to know what a given exit code means, what usually fails and why, or which problems are known and open |
+| [Post-mortems](post-mortems.md) | You want to read the write-up of a past run — what failed, how much of it was the data and how much was us. Links to every published report |
 
 ## Why these pages exist
 
@@ -50,4 +51,6 @@ traps in its channel wiring.
 
 Complete records of past runs — the Nextflow trace, per-task tool stderr, execution reports and
 the triage manifest — are archived on the Sanger farm at
-`/nfs/cellgeni/reprocessing-runs/`, one directory per run.
+`/nfs/cellgeni/reprocessing-runs/`, one directory per run. The readable write-up of each is
+published as a browser-accessible page and indexed in [Post-mortems](post-mortems.md); the
+farm archive is the durable copy, that index is where the links live.
