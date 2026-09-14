@@ -36,6 +36,10 @@ modules/.nf-test
 # The session injects zero-byte placeholders into the repo root and .claude/
 # (agents, commands, hooks, settings.json, ...). Only the skill tree is ours,
 # so ignore everything under .claude/ and re-include that one directory.
+# .mcp.json is deliberately NOT listed here: it is a real project-scoped config
+# that teams commit to share MCP servers, so it should not be ignored as a
+# placeholder. Note the `*.json` rule above already catches it — to commit a
+# real one, add `!/.mcp.json` below that rule.
 /.bash_profile
 /.bashrc
 /.gitconfig
@@ -46,6 +50,5 @@ modules/.nf-test
 /.ripgreprc
 /.idea
 /.vscode
-/.mcp.json
 .claude/*
 !.claude/skills/
