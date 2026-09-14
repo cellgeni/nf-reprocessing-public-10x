@@ -30,8 +30,11 @@ sending one to GEO/SRA/ENA.
 Four rules override everything below.
 
 1. **`attempt` is not diagnostic, and neither is a run's `OK` status.** The `errorStrategy` in
-   `nextflow.config` has a `&&`/`||` precedence bug that retries every task exactly once,
-   whatever the exit code — 1795 of 1814 August 2026 failures sat at `attempt=2`. And
+   `nextflow.config` retries every task exactly once whatever the exit code — **deliberately**,
+   so that a transient failure at an unretriable exit code is not thrown away; see
+   `classify.md §exits` for the evidence, and do not report it as a precedence bug. The
+   consequence for triage is that 1795 of 1814 August 2026 failures sat at `attempt=2` and it
+   meant nothing. And
    `errorStrategy 'ignore'` keeps failures out of the exit status entirely: batch 6 is recorded
    `OK` in `.nextflow/history` with 7 permanent failures. Never report a run as clean because
    Nextflow said so.

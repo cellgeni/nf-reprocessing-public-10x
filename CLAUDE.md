@@ -136,10 +136,18 @@ leading slash, so they match at **any** depth. A `.tsv` or `.json` anywhere, inc
 the skill was simply untracked until it was committed; only `.claude/settings.local.json` is
 excluded.
 
-**The `errorStrategy` in `nextflow.config` has a precedence bug.** `&&` binds tighter than
-`||`, so `... && task.attempt < 3 || task.attempt == 1` means every task retries once
-regardless of exit code — including 128 GB STAR jobs failing deterministically. `attempt=2` is
-therefore not diagnostic of anything. Still unfixed.
+**Every task retries once regardless of exit code, and that is deliberate.** The
+`errorStrategy` in `nextflow.config` reads `task.attempt == 1 || (exitStatus in [...] && attempt
+< 3)`; the first clause is load-bearing and must not be "simplified" away. Transient failures
+are not identifiable from an exit code — in batch 6 a STARsolo task died at exit 1 on a nonsense
+read length off a partly-staged FASTQ and succeeded on its second attempt, and exit 1 is not in
+the retriable set. Losing a good sample costs more than rerunning a doomed one. The retry also
+means a task is only ignored after failing *twice*, so the first attempt's work dir and stderr
+survive for triage.
+
+The consequence for debugging: **`attempt=2` is not diagnostic of anything.** It is a property
+of the config, not a signal about the failure — 1795 of 1814 August 2026 failures sat there.
+What matters is whether any attempt later succeeded.
 
 **`errorStrategy 'ignore'` means failures never reach the pipeline exit status**, and there is
 no failure manifest, so post-mortems have to be mined out of the logs.
