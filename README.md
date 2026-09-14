@@ -50,6 +50,13 @@ PRJEB37166	ERS4605100,ERS4605101
 - `dataset_id` — GEO series (`GSE*`), BioProject (`PRJEB*`/`PRJNA*`), or ArrayExpress accession (`E-MTAB-*`)
 - `sample_id` — comma-separated list of sample accessions belonging to that dataset
 
+**Leaving `sample_id` empty processes the entire series.** This is intentional and is how you
+ask for a whole dataset, but it is also easy to do by accident — a table that declares the
+header and supplies only `dataset_id` values looks correct on inspection. A series is often
+mixed, so the cost can be large: one ticket fetched ~596.8 GB of bulk RNA-seq, scATAC and
+bisulfite data this way before any of it was rejected downstream. Run `--metaonly` first to see
+what a series actually contains before committing the download.
+
 See [examples/datasets.tsv](examples/datasets.tsv) for a full example.
 
 ## Quick example
@@ -83,6 +90,7 @@ results/
 │   ├── bam.csv                     Index of all published BAMs
 │   ├── sra.csv                     Index of all published SRA files
 │   └── starsolo.csv                Index of all STARsolo outputs
+├── skipped_samples.tsv            Samples dropped for want of a usable species (absent if none)
 ├── versions.yml                    Software versions used by each process
 └── mapping_qc_stats.tsv            Per-sample STARsolo mapping QC statistics
 ```
