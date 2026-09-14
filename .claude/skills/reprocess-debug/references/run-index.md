@@ -10,6 +10,19 @@ and resolve only for the account that published them.
 
 `.nextflow/history` is the authority on the first five columns; see `data-map.md §history`.
 
+> ### The work directories for batches 1-5 are gone
+>
+> Deleted, confirmed 2026-09-14. **The archive is the only surviving record for those runs**, and
+> no claim about them can be re-verified against a FASTQ any more — `verify.md §walkback` and
+> SKILL.md rule 3 ("measure, do not infer") apply only to batch 6 onward.
+>
+> Batch 4 shows what that costs. It was collected for the first time on 2026-09-14: the Nextflow
+> trace survived, so we know it had **47 failed tasks, 44 permanent** — but every one of the 47
+> carries `first_error = (no .command.log found)`, because the stderr only ever existed in the
+> work directory. The counts are recoverable from the trace; the reasons are not.
+>
+> **Collect and archive a run while its work dirs still exist.**
+
 ## Batch runs
 
 | Batch | Run | Started | NF status | Session | Failed | Permanent | Archive | Post-mortem |
@@ -17,7 +30,7 @@ and resolve only for the account that published them.
 | 1 | `peaceful_feynman` | 2026-08-19 13:27 | OK | `9fd63dba` | — | — | `batch1/peaceful_feynman` | — |
 | 2 | `distraught_mercator` | 2026-08-21 15:13 | OK | `9fd63dba` | 294 | unknown † | `batch2/distraught_mercator` | — |
 | 3 | `big_keller` | 2026-08-25 18:24 | OK | `9fd63dba` | 73 in log † | 92 of 111 ‡ | `batch3/big_keller` | [Batch 3 Failure Triage](https://claude.ai/code/artifact/ef2992f4-b281-4942-8f17-8ceb4c90fbb5) |
-| 4 | `nauseous_spence` | 2026-09-01 14:55 | OK | `4645283e` | never collected | — | `batch4/nauseous_spence` | — |
+| 4 | `nauseous_spence` | 2026-09-01 14:55 | OK | `4645283e` | 47 | 44 | `batch4/nauseous_spence` | — (no stderr; see box above) |
 | 5 | `tender_brattain` | 2026-09-08 12:43 | OK | `f97ddf5e` | 48 | 48 ‡ | `batch5/tender_brattain` | [Batch 5 Post-Mortem](https://claude.ai/code/artifact/9d667def-0edb-4278-9a6d-50bc49c92931) |
 | 6 | `spontaneous_ampere` | 2026-09-08 23:25 | OK | `34653a63` | 16 | **7** | `batch6/spontaneous_ampere` | — |
 

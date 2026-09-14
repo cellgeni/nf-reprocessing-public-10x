@@ -27,9 +27,12 @@ wearing an unrelated message.
 
 Three habits are worth carrying into any use of these pages, because each one has been paid for:
 
-- **Measure, do not infer.** Work directories persist. Several confident conclusions drawn from
-  logs turned out to be wrong when checked against the FASTQs, because a failure routinely
-  surfaces two stages after its cause.
+- **Measure, do not infer — while you still can.** Several confident conclusions drawn from logs
+  turned out to be wrong when checked against the FASTQs, because a failure routinely surfaces
+  two stages after its cause. Work directories persist only until someone deletes them: batch 4
+  was collected after its had gone, and all 47 of its failures now read `(no .command.log
+  found)` — the counts survived in the trace, the reasons did not. Collect and archive a run
+  while its work dirs still exist.
 - **Aggregate by dataset before concluding anything.** Failures concentrate — one dataset was
   48% of a run's 1814 failures. A flat accession list hides that.
 - **Separate "the data is broken" from "we did not check".** Most rejected volume in a typical

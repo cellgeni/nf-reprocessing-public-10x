@@ -2,10 +2,23 @@
 
 Distilled from `docs/agent_debug.md` §5, §8, §9 and §10.
 
-**The work dirs persist.** `cleanup = false` in `nextflow.config`, and all 1814 work dirs from
-the August 2026 run were still on disk months later. This is the highest-leverage fact in the
-skill: **do not infer read structure from log text when you can measure it.** Several
-confident-looking log-based conclusions were wrong until checked.
+**Work dirs persist until someone deletes them, and someone has.** `cleanup = false` in
+`nextflow.config`, so Nextflow keeps them — but **the work dirs for batches 1-5 were deleted
+(confirmed 2026-09-14)**. Everything in this file works from batch 6 onward; for earlier runs
+there is nothing left to walk back to.
+
+Check first, and do not promise a measurement you cannot take:
+
+```bash
+ls -d "$(awk -F'\t' 'NR==2{print $6}' data/tables/failures6.tsv)" 2>/dev/null \
+  && echo "work dir present — measure it" || echo "gone — the archive is all there is"
+```
+
+Where they do survive this is the highest-leverage fact in the skill: **do not infer read
+structure from log text when you can measure it.** Several confident-looking log-based
+conclusions were wrong until checked. Where they do not, say that a claim rests on the archived
+logs alone — batch 4 was collected after its work dirs went and all 47 of its failures carry
+`(no .command.log found)`, so its counts are known and its reasons are not.
 
 ## §walkback — from a failed tag to the data
 

@@ -43,7 +43,7 @@ run by the `Launching \`main.nf\` [<run_name>]` line on line 2 of that file.
 | `logs/lsf/reprocess{Output,Error}<JOBID>.log` | driver stdout/stderr from the bsub |
 | `reports/execution_trace_<ts>.txt` | live trace, **16 columns** — a different, smaller schema than `runlogs<N>.tsv` |
 | `reports/failures_<ts>.tsv` | one hand-made manifest from batch 3; same schema as `failures<N>.tsv` |
-| `nf-work/<hh>/<hash…>/` | task work dirs — **these persist**, see `verify.md` |
+| `nf-work/<hh>/<hash…>/` | task work dirs — **deleted for batches 1-5** (2026-09-14); survive from batch 6, see `verify.md` |
 
 `<N>` is the batch number, no zero-padding, appended straight to the stem. **Batch 1 is the
 exception**: its trio is unsuffixed and lives in `data/`, not `data/tables/`

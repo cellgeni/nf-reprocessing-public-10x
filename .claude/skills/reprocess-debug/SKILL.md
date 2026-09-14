@@ -38,9 +38,12 @@ Four rules override everything below.
 2. **Aggregate by dataset before reporting anything.** Failures concentrate hard — the top 5
    datasets were 82% of August 2026's 1814, one alone was 48%. A flat accession list hides that,
    and a fix aimed at the flat list aims at the wrong thing.
-3. **Measure, do not infer.** The work dirs persist. Several confident log-based conclusions
-   were wrong until checked against the FASTQs, because a failure routinely surfaces two stages
-   downstream of its cause wearing an unrelated message. See `verify.md §walkback`.
+3. **Measure, do not infer — where you still can.** Several confident log-based conclusions were
+   wrong until checked against the FASTQs, because a failure routinely surfaces two stages
+   downstream of its cause wearing an unrelated message. See `verify.md §walkback`. **But the
+   work dirs for batches 1-5 were deleted (confirmed 2026-09-14)**, so walk-back works only from
+   batch 6 onward; for earlier runs the archive under `/nfs/cellgeni/reprocessing-runs/` is the
+   whole of the surviving evidence. Check the dir exists before promising to verify anything.
 4. **Mind the sizes.** The Bash tool timeout is 120 s; `data/tables/failed2.log` is 793 MB;
    `.nextflow.log` is 35 MB; `find` across `nf-work/` or `/` does not return. Long collections
    go in the background and get polled. Details in `data-map.md §sizes`.
