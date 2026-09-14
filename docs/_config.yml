@@ -1,0 +1,28 @@
+# GitHub Pages configuration for the docs/ knowledge base.
+# Source is set in Settings -> Pages to "Deploy from a branch": main, /docs.
+
+# Primer is GitHub's own documentation styling: no hero banner, and tables and
+# code blocks that hold up under the wide ones in archive-pathologies.md. The
+# alternatives are worse fits here — cayman opens every page with a large
+# gradient header, and minimal spends a fixed sidebar on width these tables need.
+theme: jekyll-theme-primer
+
+title: nf-reprocessing-public-10x
+description: Operational knowledge for loading and reprocessing public 10x datasets
+
+# The pages are plain Markdown with no front matter. GitHub Pages enables
+# jekyll-optional-front-matter, so they are still built as pages — but without a
+# layout they render unstyled, outside the theme. This applies the theme's
+# default layout to all of them, so no page needs front matter added.
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
+# Insurance only: both files are gitignored (docs/agent_debug*.md), so they are
+# not on main and Pages builds from the branch, not a working tree. This keeps
+# them out if one is ever force-added.
+exclude:
+  - agent_debug.md
+  - agent_debug.superseded.md
