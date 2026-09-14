@@ -20,13 +20,17 @@ any non-trivial change:
   against the `nf-work` dirs where they survive (batches 1-5 were deleted 2026-09-14),
   known-good regression accessions, and open issues found
   but not fixed. Also `references/run-index.md` — every run's name, session, archive path and
-  post-mortem URL, so none of that has to be hunted for. Supersedes the old `docs/agent_debug.md`,
+  failure counts, so none of that has to be hunted for. Supersedes the old `docs/agent_debug.md`,
   which stays untracked and local.
 - [docs/](docs/) — the user-facing knowledge base, tracked and browsable on GitHub:
   [`archive-pathologies.md`](docs/archive-pathologies.md) (per-accession defects found in public
   submissions, and the separate list of correctly-labelled data we rejected late),
   [`reporting-upstream.md`](docs/reporting-upstream.md) (how to report one to GEO/SRA/ENA),
-  [`failure-modes.md`](docs/failure-modes.md) (exit codes, baseline distribution, open problems).
+  [`failure-modes.md`](docs/failure-modes.md) (exit codes, baseline distribution, open problems),
+  [`post-mortems.md`](docs/post-mortems.md) (every published run write-up and its link — the
+  reports go out as Claude Artifacts, browser-readable, and this file is where the URLs are
+  tracked; read a link from here rather than listing artifacts, and add one here when you
+  publish).
 - [docs/10x_chemistry_reference.md](docs/10x_chemistry_reference.md) — the chemistry/geometry
   table the inference scripts implement: which whitelist means which chemistry, what is
   `layout_only` vs unique, and which layouts (ATAC, feature-barcode, V(D)J, Flex) must be
@@ -136,10 +140,18 @@ leading slash, so they match at **any** depth. A `.tsv` or `.json` anywhere, inc
 the skill was simply untracked until it was committed; only `.claude/settings.local.json` is
 excluded.
 
-**The `errorStrategy` in `nextflow.config` has a precedence bug.** `&&` binds tighter than
-`||`, so `... && task.attempt < 3 || task.attempt == 1` means every task retries once
-regardless of exit code — including 128 GB STAR jobs failing deterministically. `attempt=2` is
-therefore not diagnostic of anything. Still unfixed.
+**Every task retries once regardless of exit code, and that is deliberate.** The
+`errorStrategy` in `nextflow.config` reads `task.attempt == 1 || (exitStatus in [...] && attempt
+< 3)`; the first clause is load-bearing and must not be "simplified" away. Transient failures
+are not identifiable from an exit code — in batch 6 a STARsolo task died at exit 1 on a nonsense
+read length off a partly-staged FASTQ and succeeded on its second attempt, and exit 1 is not in
+the retriable set. Losing a good sample costs more than rerunning a doomed one. The retry also
+means a task is only ignored after failing *twice*, so the first attempt's work dir and stderr
+survive for triage.
+
+The consequence for debugging: **`attempt=2` is not diagnostic of anything.** It is a property
+of the config, not a signal about the failure — 1795 of 1814 August 2026 failures sat there.
+What matters is whether any attempt later succeeded.
 
 **`errorStrategy 'ignore'` means failures never reach the pipeline exit status**, and there is
 no failure manifest, so post-mortems have to be mined out of the logs.

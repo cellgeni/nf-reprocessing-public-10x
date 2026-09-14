@@ -17,7 +17,8 @@
 #   execution_report_<ts>.html.gz, execution_timeline_<ts>.html.gz,
 #   execution_trace_<ts>.txt.gz                     nextflow's own reports
 #   lsf_{output,error}_<jobid>.log.gz               driver stdout/stderr
-#   postmortem.html                                 the published write-up, if any
+#   postmortem.html                                 the published write-up, if any;
+#                          manifest.txt also carries its URL from docs/post-mortems.md
 #   manifest.txt           what this run was, and what is and is not in here
 #
 # Nothing is skipped silently. A file that is missing or too large is recorded
@@ -33,7 +34,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 die()  { echo "error: $*" >&2; exit 1; }
 warn() { echo "warn:  $*" >&2; }
 
-usage() { sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+usage() { sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     echo; echo "options: --batch N | --run NAME [--latest] [--dest DIR] [--dry-run]"
     echo "         [--max-size BYTES] [--force]"; exit 1; }
 
@@ -107,6 +108,16 @@ for pm in "data/failure-postmortem-batch${N}.html" "data/failure-postmortem-run$
     [[ -f "$pm" ]] && { add "$pm" "postmortem.html" 0; break; }
 done
 
+# and the link to the published page, from the tracked index of record. Matched on
+# the run name, which every batch row carries in its archive path. Absent is normal:
+# the report is usually published after the run is archived.
+PM_INDEX="$REPO/docs/post-mortems.md"
+PM_URL=""
+if [[ -f "$PM_INDEX" ]]; then
+    PM_URL="$(grep -F "$RUN" "$PM_INDEX" 2>/dev/null \
+        | grep -o 'https://claude\.ai/code/artifact/[0-9a-f-]\{36\}' | head -1 || true)"
+fi
+
 # triage json: generate next to the manifest if it is not there already
 # --json takes the destination path; it does NOT write to stdout.
 # Only batch 6 has a failures<N>.tsv — earlier runs were collected before the
@@ -131,6 +142,13 @@ fi
 hsize() { local b="${1:-0}"; awk -v b="$b" 'BEGIN{s="B KB MB GB TB";split(s,u," ");
     i=1; while(b>=1024 && i<5){b/=1024;i++} printf "%.1f%s", b, u[i]}'; }
 
+# Destination name as the writer below will actually produce it. Keep this test
+# identical to the one in the write loop: gzip only when the plan asks for it AND
+# the file is over 1 MiB, so a small .log is archived plain, not as a .log.gz.
+dst_name() { local dst="$1" gz="$2" sz="$3"
+    if (( gz )) && (( sz > 1048576 )); then echo "$dst.gz"; else echo "$dst"; fi; }
+
+
 # must be assigned, not just declared: `set -u` treats a declared-but-unset
 # array as unbound when the plan turns out to have no gaps at all.
 NOTES=()
@@ -148,7 +166,9 @@ for e in "${PLAN[@]}"; do
         NOTES+=("skipped: $src ($(hsize "$sz")) exceeded --max-size $(hsize "$MAXSIZE")")
         continue
     fi
-    printf '%-52s %10s  %s\n' "$src" "$(hsize "$sz")" "$dst$( ((gz)) && echo .gz )" >&2
+    # Predict the destination name with the SAME test the writer uses below, or the
+    # preview promises failed6.log.gz and the archive ends up holding failed6.log.
+    printf '%-52s %10s  %s\n' "$src" "$(hsize "$sz")" "$(dst_name "$dst" "$gz" "$sz")" >&2
 done
 
 if (( DRY )); then
@@ -167,7 +187,7 @@ for e in "${PLAN[@]}"; do
     [[ -f "$src" ]] || continue
     sz=$(stat -c%s "$src")
     (( MAXSIZE > 0 && sz > MAXSIZE )) && continue
-    if (( gz )) && (( sz > 1048576 )); then
+    if [[ "$(dst_name "$dst" "$gz" "$sz")" == *.gz ]]; then
         gzip -c "$src" > "$DEST/$dst.gz" && copied=$((copied+1))
     else
         cp "$src" "$DEST/$dst" && copied=$((copied+1))
@@ -184,6 +204,9 @@ done
     echo "command         : $(cut -f7 <<<"$RR_ROW")"
     echo "nextflow        : $(nextflow -v 2>/dev/null || echo 'not on PATH at archive time')"
     echo "work dir root   : $REPO/nf-work"
+    # the published page is the readable copy; postmortem.html here is the durable
+    # one. Carry the link so the archive says where it is, not just that it exists.
+    echo "post-mortem     : ${PM_URL:-not recorded in docs/post-mortems.md}"
     echo "archived        : $(date '+%Y-%m-%d %H:%M:%S') by ${USER:-unknown}"
     echo "archived from   : $REPO"
     echo
@@ -205,3 +228,4 @@ echo >&2
 echo "archived $copied files to $DEST ($(du -sh "$DEST" | cut -f1))" >&2
 (( ${#NOTES[@]} )) && { echo "gaps recorded in manifest.txt:" >&2; printf '  %s\n' "${NOTES[@]}" >&2; }
 echo "next: add the run to references/run-index.md" >&2
+[[ -z "${PM_URL:-}" ]] && echo "      and, once a post-mortem is published, its URL to docs/post-mortems.md" >&2

@@ -5,7 +5,15 @@ Distilled from `docs/agent_debug.md` §12. Reference examples kept at
 `data/failure-postmortem-run3.html`.
 
 A failure post-mortem is a deliverable with an audience, so it goes out as an Artifact — a
-private page on claude.ai the user can choose to share — not as terminal scrollback.
+private page on claude.ai the user can choose to share — not as terminal scrollback, and not as
+an HTML file left on the farm for someone to `scp` before they can read it.
+
+**The artifact is the deliverable; the repository holds the link, not the page.** Three copies
+exist and each has one job: the artifact is the readable one, the `data/*.html` source is the
+editable one (gitignored, on scratch), the `postmortem.html` inside the run's archive directory
+is the durable one. The link itself is tracked, in
+[`docs/post-mortems.md`](../../../../docs/post-mortems.md) — that file is the index of record and
+the only complete list of what has been published.
 
 ## §procedure
 
@@ -23,10 +31,13 @@ private page on claude.ai the user can choose to share — not as terminal scrol
 5. To update: **edit the same file and call `Artifact` with the same `file_path`** — it
    redeploys to the same URL. A different path claims a new URL. From a *different*
    conversation you must pass the artifact's `url` explicitly, or you create a duplicate.
-6. **Record the URL in `references/run-index.md`**, in the run's row. This is the step that gets
+6. **Record the URL in [`docs/post-mortems.md`](../../../../docs/post-mortems.md)** — a row in
+   the Published table, and if the run was one of the gaps, drop it from the "Runs with no
+   post-mortem" table in the same change. Then name the report in the run's row in
+   `references/run-index.md` (name only; the URL lives in one place). This is the step that gets
    skipped, because once the artifact is published the work feels finished — and then the next
-   session has to list every artifact and guess from titles. Look the URL up there rather than
-   with `action: "list"`.
+   session has to list every artifact and guess from titles. Look a URL up in
+   `docs/post-mortems.md` rather than with `action: "list"`.
 
 ## §mechanics
 

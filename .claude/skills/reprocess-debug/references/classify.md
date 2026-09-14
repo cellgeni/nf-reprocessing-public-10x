@@ -54,13 +54,32 @@ the August 2026 reference distribution is itself the finding.
 **Never read `attempt` as diagnostic.** `nextflow.config` has
 
 ```groovy
-errorStrategy = { task.exitStatus in ((130..145) + 104 + 175) && task.attempt < 3 || task.attempt == 1 ? 'retry' : 'ignore' }
+errorStrategy = { task.attempt == 1 || (task.exitStatus in ((130..145) + 104 + 175) && task.attempt < 3) ? 'retry' : 'ignore' }
 ```
 
-`&&` binds tighter than `||`, so this parses as `(exitStatus in [...] && attempt < 3) || (attempt
-== 1)` — **every** task retries once regardless of exit code. That is why 1795 of 1814 failures
-in August 2026 sat at `attempt=2`. It is a property of the config, not a signal about the
-failure. Still unfixed.
+**Every** task retries once regardless of exit code; only the listed codes get a third attempt.
+That is why 1795 of 1814 failures in August 2026 sat at `attempt=2` — a property of the config,
+not a signal about the failure.
+
+**The first clause is deliberate, not a precedence accident.** It has been mistaken for one more
+than once; leave it alone. Transient failures are not identifiable from an exit code, so
+everything gets a second chance. Batch 6 shows both directions:
+
+| Exit | First error | Attempts failed | Recovered |
+|---|---|---|---|
+| 130 | `[lsf] TERM_MEMLIMIT` | 1 | yes — all 6 |
+| 104 | `FATAL ERROR in reads input: quality string length` | 1 | yes |
+| 1 | `R1 length (-2147483647) leaves no room for a UMI` | 1 | **yes** |
+| 139 | Segfault in STAR under `--genomeLoad LoadAndRemove` | 3 | no |
+| 1 | `No whitelist matched 200,000 random barcodes` | 2 | no |
+
+Row 3 is the one to remember: exit 1 is not retriable, and that sample survived only because
+every task gets one retry — a nonsense read length off a FASTQ that was still being staged.
+Rows 4-5 are the price: two doomed tasks reran. That trade is intended, and losing a good sample
+costs more than rerunning a doomed one.
+
+The second reason for the retry: a task is ignored only after failing **twice**, so the first
+attempt's work dir and stderr survive for triage.
 
 `errorStrategy 'ignore'` also means failures never reach the pipeline's exit status. A run can
 finish `OK` in `.nextflow/history` with hundreds of failed tasks — batch 6 did.

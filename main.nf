@@ -38,6 +38,9 @@ def helpMessage() {
     GSE230685	GSM7232572,GSM7232573
     E-MTAB-9221	ERS4689152,ERS4689153
     PRJEB37166	ERS4605100,ERS4605101
+
+    Leaving sample_id empty processes the WHOLE series. That is intentional, but a
+    series is often mixed — use --metaonly first to see what it holds.
     ==========================
 
     == Output structure ==
@@ -60,7 +63,8 @@ def helpMessage() {
     │   ├── sra.csv                 Index of all published SRA files
     │   └── starsolo.csv            Index of all STARsolo outputs
     ├── versions.yml                Software versions
-    └── mapping_qc_stats.tsv        Per-sample STARsolo mapping QC statistics
+    ├── mapping_qc_stats.tsv        Per-sample STARsolo mapping QC statistics
+    └── skipped_samples.tsv         Samples dropped for want of a species (absent if none)
     ==========================
     """.stripIndent()
 }
@@ -94,9 +98,16 @@ workflow {
         System.exit(params.help ? 0 : 1)
     }
 
-    if (!(params.metaonly instanceof Boolean) && !(params.metaonly.toString().toLowerCase() in ['true', 'false'])) {
-        log.error("Invalid value for --metaonly: ${params.metaonly}. Expected a boolean (true/false).")
-        System.exit(1)
+    // Every boolean flag is read as `value.toString().toLowerCase() == 'true'`, so an
+    // unrecognised but truthy value (--starsolo 1, yes, or a typo like ture) reads as
+    // FALSE. Left unchecked that downloads an entire batch, aligns nothing and exits 0
+    // without saying why. Validate all of them up front, before anything is fetched.
+    ['metaonly', 'starsolo', 'cellranger', 'no_infer_specie'].each { flag ->
+        def value = params[flag]
+        if (!(value instanceof Boolean) && !(value?.toString()?.toLowerCase() in ['true', 'false'])) {
+            log.error("Invalid value for --${flag}: '${value}'. Expected a boolean (true/false).")
+            System.exit(1)
+        }
     }
 
     if (params.no_infer_specie && params.default_specie == null) {
@@ -163,6 +174,25 @@ workflow {
                 log.info("Mapping QC stats saved to ${params.outdir}/mapping_qc_stats.tsv")
             }
     
+    // Samples dropped for want of a usable species. Written with collectFile rather
+    // than a publish/output target because there is no file to publish — only the
+    // fact that the sample was dropped. collectFile writes nothing when the channel
+    // is empty, so a clean run produces no file at all.
+    REPROCESS10X.out.skipped
+        .collectFile(
+            name: 'skipped_samples.tsv',
+            storeDir: params.outdir,
+            newLine: true,
+            sort: true,
+            seed: "dataset_id\tsample_id\tspecie"
+        ) { meta ->
+            def row = unwrapGroupKeys(meta)
+            "${row.dataset_id}\t${row.id}\t${row.specie}"
+        }
+        .subscribe { __ ->
+                log.warn("Some samples were skipped for want of a species — see ${params.outdir}/skipped_samples.tsv")
+            }
+
     publish:
     metadata       = REPROCESS10X.out.metadata.map { meta, files -> tuple(unwrapGroupKeys(meta), files) }
     bam            = REPROCESS10X.out.bam.map { meta, bam -> unwrapGroupKeys(meta) + [path: bam] }

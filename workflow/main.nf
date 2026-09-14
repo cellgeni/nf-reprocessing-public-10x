@@ -33,6 +33,7 @@ workflow REPROCESS10X {
     starsolo        = channel.empty()
     soloqc          = channel.empty()
     cellranger      = channel.empty()
+    skipped         = channel.empty()
 
     // STEP 0.2: Convert dataset list to channel
     datasets = datasetlist
@@ -83,11 +84,23 @@ workflow REPROCESS10X {
                 other: true
             }
 
-        fastqs.other
+        // Samples with no usable species are dropped here, and this is the only path
+        // that can lose one with no record at all. The warning used to sit on a `.map`
+        // whose result was never consumed, so whether it was emitted depended on
+        // Nextflow instantiating an operator for a dangling channel. Emitting the metas
+        // gives the map a real consumer (main.nf writes them to skipped_samples.tsv),
+        // which makes the log line certain as a side effect.
+        //
+        // Only id/dataset_id/specie travel: `specie` is set in DOWNLOAD10X's
+        // collected_links, upstream of every process, so adding a reason key to meta
+        // would change the task hash of the whole pipeline. resolve_specie already
+        // logs the specific reason ("conflicting species", "has no reference", ...).
+        skipped = fastqs.other
             .map { meta, _fastqs ->
-                log.warn "Sample ${meta.id} (${meta.dataset_id}) has no usable species — skipping alignment"
-                [meta, _fastqs]
+                log.warn "Sample ${meta.id} (${meta.dataset_id}) has no usable species '${meta.specie}' — skipping alignment"
+                meta
             }
+
         
         // Collect channels
         original_fastq = original_fastq.mix(DOWNLOAD10X.out.original_fastq)
@@ -163,5 +176,6 @@ workflow REPROCESS10X {
     starsolo       = starsolo
     soloqc         = soloqc
     cellranger     = cellranger
+    skipped        = skipped
     versions       = versions
 }

@@ -44,8 +44,12 @@ permanent failures. `errorStrategy 'ignore'` means a green run tells you nothing
 
 ## §open — found but not fixed
 
-* **`errorStrategy` precedence bug.** `&&` binds tighter than `||`, so every task retries once
-  including 128 GB STAR jobs on deterministic errors. `attempt` is not diagnostic.
+* ~~**`errorStrategy` precedence bug.**~~ **Closed — not a bug.** Retrying every task once
+  whatever its exit code is intentional, and the `task.attempt == 1` clause is load-bearing:
+  batch 6 lost no sample to a transient exit-1 failure because of it. See `classify.md §exits`
+  for the evidence table. Two things remain true and are not defects: `attempt` is not
+  diagnostic, and a deterministic failure costs one extra attempt — the accepted price of not
+  discarding transient ones.
 * **No failure manifest inside the pipeline.** `bin/collect_run_logs.sh` reconstructs one after
   the fact, but a `workflow.onComplete` hook writing run/sample/dataset/process/exit/first-error
   would remove the whole collection step. A previous attempt at this was reverted (commit
