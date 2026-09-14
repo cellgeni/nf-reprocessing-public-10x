@@ -1,9 +1,7 @@
 process REPROCESS10X_LOADDATA {
     tag "Loading ${meta.id}"
 
-    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'docker://quay.io/cellgeni/reprocess_10x:latest':
-        'quay.io/cellgeni/reprocess_10x:latest' }"
+    container "quay.io/cellgeni/reprocess_10x:latest"
 
     input:
     tuple val(meta), val(link)

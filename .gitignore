@@ -1,0 +1,54 @@
+.gitignore
+whitelists
+*bsub
+logs
+.nextflow
+nf-work
+*.nextflow.log*
+results
+results_reprocess
+examples
+data
+scripts
+upload_results
+*.csv
+*.json
+*.log
+*tsv
+*list
+reports
+results_old*
+fields.txt
+test.nf
+test.nf
+.lineage
+tick-4684*
+results-metaonly
+.module.log*
+test
+results*
+tick*
+docs/agent_debug*.md
+.nf-test
+.nf-test.log
+modules/.nf-test
+
+# The session injects zero-byte placeholders into the repo root and .claude/
+# (agents, commands, hooks, settings.json, ...). Only the skill tree is ours,
+# so ignore everything under .claude/ and re-include that one directory.
+# .mcp.json is deliberately NOT listed here: it is a real project-scoped config
+# that teams commit to share MCP servers, so it should not be ignored as a
+# placeholder. Note the `*.json` rule above already catches it — to commit a
+# real one, add `!/.mcp.json` below that rule.
+/.bash_profile
+/.bashrc
+/.gitconfig
+/.gitmodules
+/.profile
+/.zshrc
+/.zprofile
+/.ripgreprc
+/.idea
+/.vscode
+.claude/*
+!.claude/skills/

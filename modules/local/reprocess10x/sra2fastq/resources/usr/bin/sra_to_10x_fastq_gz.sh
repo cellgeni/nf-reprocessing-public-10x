@@ -186,7 +186,7 @@ function sra2fastq {
         echo "WARNING: Detected 10x 3' v1 barcode read ($BC) but could not find a 9-12 bp UMI FASTQ."
         echo "WARNING: This usually means the SRA dump did not preserve the technical/UMI read. Leaving all FASTQs compressed for manual inspection."
         compress_all_fastqs "$SRA" "$CMD"
-        return 0
+        exit 1
       fi
 
       echo "Detected official 10x Chromium 3' v1 layout: barcode=$BC (14 bp whitelist), UMI=$UMI (~${UMLEN} bp), cDNA=$BIO (~${BLEN} bp)"

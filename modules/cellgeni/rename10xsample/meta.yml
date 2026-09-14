@@ -1,0 +1,54 @@
+---
+name: "cellgeni/rename10xsample"
+description: >
+  Collects per-run Cell Ranger-style FASTQs for a sample and renames them to a
+  consistent sample-level naming scheme, ready for downstream alignment.
+keywords:
+  - 10x
+  - single-cell
+  - FASTQ
+  - rename
+  - Cell Ranger
+  - sample
+tools:
+  - rename_fastqs.py:
+      description: "Renames and collects per-run FASTQs into a unified Cell Ranger-style sample-level naming scheme."
+      homepage: "https://github.com/cellgeni/nf-reprocessing-public-10x"
+      licence:
+        - "MIT"
+input:
+- - meta:
+      type: "map"
+      description: "Map with sample-level metadata. Must contain key 'id' with the sample accession.\ne.g. [ id:'GSM1234567' ]\n"
+  - fastqs:
+      type: "file"
+      description: "Cell Ranger-style FASTQ files from one or more runs belonging to the sample. Staged under fastqs/."
+      pattern: "*.fastq.gz"
+output:
+  reads:
+  - - meta:
+        type: "map"
+        description: "Map with sample-level metadata, passed through from input.\ne.g. [ id:'GSM1234567' ]\n"
+    - "*_R*_001.fastq.gz":
+        type: "file"
+        description: "Sample-level renamed biological read FASTQs (R1, R2)."
+        pattern: "*_R*_001.fastq.gz"
+  index:
+  - - meta:
+        type: "map"
+        description: "Map with sample-level metadata, passed through from input.\ne.g. [ id:'GSM1234567' ]\n"
+    - "*_I*_001.fastq.gz":
+        type: "file"
+        description: "Sample-level renamed index read FASTQs (I1, I2), if present."
+        pattern: "*_I*_001.fastq.gz"
+        optional: true
+  versions:
+  - path: "versions.yml"
+    type: "file"
+    description: "YAML file recording the Python version used by this process."
+authors:
+  - "@claptar"
+maintainers:
+  - "@claptar"
+version: "0.0.1"
+license: "MIT"

@@ -22,6 +22,8 @@ def helpMessage() {
         --no_infer_specie   Do not read species from metadata; assign --default_specie to all samples.
                             Requires --default_specie.
         --metaonly          Only fetch metadata, skip downloading and alignment (default: false).
+        --starsolo          Run STARsolo alignment after downloading (default: false).
+        --cellranger        Run Cell Ranger alignment after downloading (default: false, not yet implemented).
         --help              Show this help message and exit.
 
     Example:
@@ -69,6 +71,21 @@ def unwrapGroupKeys(Map meta) {
     }
 }
 
+// Sample metadata as one row of an aligner index: a fixed set of keys in a fixed order.
+// The index writes its header from the first record and then each record's own fields in
+// order, so a sample missing a key emits a short row under a header that has the column.
+// The chemistry keys are exactly that case — they are set upstream only for samples whose
+// chemistry run-level inference could settle.
+def alignerIndexRow(Map meta) {
+    [
+        id        : meta.id,
+        dataset_id: meta.dataset_id,
+        specie    : meta.specie,
+        chemistry : meta.chemistry ?: '',  // Cell Ranger --chemistry
+        wl        : meta.wl ?: '',         // STARsolo --wl
+    ]
+}
+
 workflow {
     main:
     // Validate input parameters and show help if needed
@@ -95,11 +112,15 @@ workflow {
     // Load files
     datasetlist     = channel.value( file( params.datasets, checkIfExists: true ) )
     wl_basedir      = params.wl_basedir ? channel.value( file( params.wl_basedir, checkIfExists: true ) ) : channel.empty()
-    human_reference = params.human_reference ? channel.value( tuple( [id: "human"], file( params.human_reference, checkIfExists: true )) ) : channel.empty()
-    mouse_reference = params.mouse_reference ? channel.value( tuple( [id: "mouse"], file( params.mouse_reference, checkIfExists: true )) ) : channel.empty()
+    star_human_reference = params.star_human_reference ? channel.value( tuple( [id: "human"], file( params.star_human_reference, checkIfExists: true )) ) : channel.empty()
+    star_mouse_reference = params.star_mouse_reference ? channel.value( tuple( [id: "mouse"], file( params.star_mouse_reference, checkIfExists: true )) ) : channel.empty()
+    cr_human_reference = params.cr_human_reference ? channel.value( tuple( [id: "human"], file( params.cr_human_reference, checkIfExists: true )) ) : channel.empty()
+    cr_mouse_reference = params.cr_mouse_reference ? channel.value( tuple( [id: "mouse"], file( params.cr_mouse_reference, checkIfExists: true )) ) : channel.empty()
 
     // Define variables
     def metaonlyflag    = params.metaonly && params.metaonly.toString().toLowerCase() == 'true' ? true : false
+    def starsoloflag    = params.starsolo && params.starsolo.toString().toLowerCase() == 'true' ? true : false
+    def cellrangerflag  = params.cellranger && params.cellranger.toString().toLowerCase() == 'true' ? true : false
     def no_infer_specie = params.no_infer_specie && params.no_infer_specie.toString().toLowerCase() == 'true' ? true : false
     def defaultspecie   = params.default_specie
 
@@ -107,11 +128,15 @@ workflow {
     REPROCESS10X(
         datasetlist,
         wl_basedir,
-        human_reference,
-        mouse_reference,
+        star_human_reference,
+        star_mouse_reference,
+        cr_human_reference,
+        cr_mouse_reference,
         metaonlyflag,
         no_infer_specie,
-        defaultspecie
+        defaultspecie,
+        starsoloflag,
+        cellrangerflag
     )
 
     // Collect versions
@@ -139,14 +164,17 @@ workflow {
             }
     
     publish:
-    metadata = REPROCESS10X.out.metadata.map { meta, files -> tuple(unwrapGroupKeys(meta), files) }
-    bam      = REPROCESS10X.out.bam.map { meta, bam -> unwrapGroupKeys(meta) + [path: bam] }
-    sra      = REPROCESS10X.out.sra.map { meta, sra -> unwrapGroupKeys(meta) + [path: sra]}
-    fastq    = REPROCESS10X.out.fastq
+    metadata       = REPROCESS10X.out.metadata.map { meta, files -> tuple(unwrapGroupKeys(meta), files) }
+    bam            = REPROCESS10X.out.bam.map { meta, bam -> unwrapGroupKeys(meta) + [path: bam] }
+    sra            = REPROCESS10X.out.sra.map { meta, sra -> unwrapGroupKeys(meta) + [path: sra]}
+    original_fastq = REPROCESS10X.out.original_fastq.map { meta, fastqs -> unwrapGroupKeys(meta) + [paths: fastqs] }
+    runs           = REPROCESS10X.out.runs.map { meta, fastqs -> unwrapGroupKeys(meta) + [paths: fastqs] }
+    fastq          = REPROCESS10X.out.fastq
         .flatMap { meta, fastqs -> fastqs.collect { file -> [meta, file] } }
         .map { meta, fastq -> unwrapGroupKeys(meta) + [path: fastq] }
-    starsolo = REPROCESS10X.out.starsolo.map { meta, starsolo -> unwrapGroupKeys(meta) + [path: starsolo] }
-    soloqc   = REPROCESS10X.out.soloqc.map { meta, soloqc -> meta.getGroupTarget() + [path: soloqc] }
+    starsolo   = REPROCESS10X.out.starsolo.map { meta, starsolo -> alignerIndexRow(unwrapGroupKeys(meta)) + [path: starsolo] }
+    soloqc     = REPROCESS10X.out.soloqc.map { meta, soloqc -> meta.getGroupTarget() + [path: soloqc] }
+    cellranger = REPROCESS10X.out.cellranger.map { meta, cellranger -> alignerIndexRow(unwrapGroupKeys(meta)) + [path: cellranger] }
 }
 
 output {
@@ -178,11 +206,31 @@ output {
         label "fastq"
         label "raw"
         index {
-            path "index/fastq.csv"
+            path "index/renamed_fastq.csv"
             header true
             sep ','
         }
-        path { output -> "raw/${output.dataset_id}/fastq/${output.id}" }
+        path { output -> "raw/${output.dataset_id}/renamed_fastq/${output.id}" }
+    }
+    original_fastq {
+        label "fastq"
+        label "raw"
+        index {
+            path "index/original_fastq.csv"
+            header true
+            sep ','
+        }
+        path { output -> "raw/${output.dataset_id}/fastq/${output.sample_id}/${output.id}" }
+    }
+    runs {
+        label "fastq"
+        label "raw"
+        index {
+            path "index/runs.csv"
+            header true
+            sep ','
+        }
+        path { output -> "raw/${output.dataset_id}/runs/${output.sample_id}/${output.id}" }
     }
     starsolo {
         label "starsolo"
@@ -202,6 +250,15 @@ output {
             sep ','
         }
         path { output -> "starsolo/${output.id}/" }
+    }
+    cellranger {
+        label "cellranger"
+        index {
+            path "index/cellranger.csv"
+            header true
+            sep ','
+        }
+        path { output -> "cellranger/${output.dataset_id}/" }
     }
 
 }

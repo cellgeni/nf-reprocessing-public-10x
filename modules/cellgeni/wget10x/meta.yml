@@ -1,0 +1,65 @@
+---
+name: "cellgeni/wget10x"
+description: >
+  Downloads a single public sequencing file (BAM, SRA, or FASTQ) for a 10x run
+  via wget and renames it to a consistent per-run naming scheme.
+keywords:
+  - wget
+  - download
+  - 10x
+  - single-cell
+  - BAM
+  - SRA
+  - FASTQ
+  - public data
+tools:
+  - wget:
+      description: "Command-line utility for retrieving files over HTTP/HTTPS/FTP."
+      homepage: "https://www.gnu.org/software/wget/"
+      licence:
+        - "GPL-3.0-or-later"
+input:
+- - meta:
+      type: "map"
+      description: "Map with run-level metadata. Must contain key 'id' with the run accession and key 'type' with the file type to expect ('BAM', 'SRA', or 'FASTQ').\ne.g. [ id:'SRR12345678', type:'BAM' ]\n"
+  - link:
+      type: "string"
+      description: "URL of the file to download for this run."
+output:
+  sra:
+  - - meta:
+        type: "map"
+        description: "Map with run-level metadata, passed through from input.\ne.g. [ id:'SRR12345678', type:'SRA' ]\n"
+    - "${meta.id}":
+        type: "file"
+        description: "Downloaded SRA file, renamed to the run accession. Emitted only when meta.type is 'SRA'."
+        pattern: "${meta.id}"
+        optional: true
+  fastq:
+  - - meta:
+        type: "map"
+        description: "Map with run-level metadata, passed through from input.\ne.g. [ id:'SRR12345678', type:'FASTQ' ]\n"
+    - "*.f*q*":
+        type: "file"
+        description: "Downloaded FASTQ file(s). Emitted only when meta.type is 'FASTQ'."
+        pattern: "*.f*q*"
+        optional: true
+  bam:
+  - - meta:
+        type: "map"
+        description: "Map with run-level metadata, passed through from input.\ne.g. [ id:'SRR12345678', type:'BAM' ]\n"
+    - "${meta.id}.bam":
+        type: "file"
+        description: "Downloaded BAM file, renamed to '${meta.id}.bam'. Emitted only when meta.type is 'BAM'."
+        pattern: "*.bam"
+        optional: true
+  versions:
+  - path: "versions.yml"
+    type: "file"
+    description: "YAML file recording the wget version used by this process."
+authors:
+  - "@claptar"
+maintainers:
+  - "@claptar"
+version: "0.0.1"
+license: "MIT"

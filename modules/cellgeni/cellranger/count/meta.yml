@@ -1,0 +1,49 @@
+---
+name: "cellgeni/cellranger/count"
+description: >
+  Runs Cell Ranger count on 10x single-cell RNA-seq FASTQs to align reads,
+  generate feature-barcode matrices, and produce per-sample output directories.
+keywords:
+  - cellranger
+  - 10x
+  - single-cell
+  - RNA-seq
+  - count matrix
+tools:
+  - cellranger:
+      description: "Cell Ranger by 10x Genomics is a set of analysis pipelines that process Chromium single-cell data."
+      homepage: "https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/what-is-cell-ranger"
+      licence:
+        - "10x Genomics EULA"
+input:
+- - meta:
+      type: "map"
+      description: "Map with sample-level metadata. Must contain key 'id' matching the FASTQ filename prefix so that Cell Ranger can locate the correct files via --sample.\ne.g. [ id:'SRR12345678' ]\n"
+  - fastqs:
+      type: "file"
+      description: "FASTQ files must be named with meta.id as the prefix (e.g. {meta.id}_S1_L001_R1_001.fastq.gz) so that Cell Ranger can locate them via --sample."
+- - ref_meta:
+      type: "map"
+      description: "Map with reference metadata. Must contain key 'id' with the reference name.\ne.g. [ id:'human' ]\n"
+  - reference:
+      type: "directory"
+      description: "Cell Ranger reference genome directory."
+output:
+  mapping:
+  - - meta:
+        type: "map"
+        description: "Map with sample-level metadata, passed through from input.\ne.g. [ id:'SRR12345678' ]\n"
+    - "${meta.id}":
+        type: "directory"
+        description: "Cell Ranger output directory for the sample, containing outs/ with count matrices and summaries."
+        pattern: "${meta.id}"
+  versions:
+  - path: "versions.yml"
+    type: "file"
+    description: "YAML file recording the Cell Ranger version used by this process."
+authors:
+  - "@claptar"
+maintainers:
+  - "@claptar"
+version: "0.0.2-9.0.1"
+license: "MIT"

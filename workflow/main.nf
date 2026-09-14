@@ -3,19 +3,28 @@ include { DOWNLOAD10X } from '../subworkflows/local/download10x/'
 include { FETCH10XMETA } from 'cellgeni/fetch10xmeta'
 include { STARSOLO10X as STARSOLO10X_HUMAN } from '../subworkflows/local/starsolo10x/'
 include { STARSOLO10X as STARSOLO10X_MOUSE } from '../subworkflows/local/starsolo10x/'
+include { CELLRANGER_COUNT as CELLRANGER_COUNT_HUMAN } from '../modules/cellgeni/cellranger/count'
+include { CELLRANGER_COUNT as CELLRANGER_COUNT_MOUSE } from '../modules/cellgeni/cellranger/count'
+include { REPROCESS10X_MAPPINGQC } from '../modules/local/reprocess10x/mappingqc'
 
 workflow REPROCESS10X {
     take:
     datasetlist      // channel: [ val(meta), [ sample_ids ] ]
     wl_basedir       // channel: [ dirpath ] a path to whitelist base directory
-    human_reference  // channel: [ tuple( [id: "human"], file(human_reference) ) ]
-    mouse_reference  // channel: [ tuple( [id: "mouse"], file(mouse_reference) ) ]
-    metaonlyflag     // channel: [ val(metaonlyflag) ] a flag to indicate whether to only fetch metadata without downloading data or running STARsolo (e.g. for testing or debugging)
-    no_infer_specie  // channel: [ val(no_infer_specie) ] a flag to indicate whether to infer specie from metadata or not; if true, all samples will be assigned the default_specie (or 'UNKNOWN' if default_specie is not set)
-    default_specie   // channel: [ val(default_specie) ] the default specie to assign to samples with unknown species in metadata; if not set, 'UNKNOWN' will be used as default specie
+    star_human_reference  // channel: [ tuple( [id: "human"], file(human_reference) ) ]
+    star_mouse_reference  // channel: [ tuple( [id: "mouse"], file(mouse_reference) ) ]
+    cr_human_reference  // channel: [ tuple( [id: "human"], file(human_reference) ) ]
+    cr_mouse_reference // channel: [ tuple( [id: "mouse"], file(mouse_reference) ) ]
+    metaonlyflag     // channel: [ val(metaonlyflag) ] only fetch metadata, skip download and alignment
+    no_infer_specie  // channel: [ val(no_infer_specie) ] skip reading species from metadata; assign default_specie to all samples
+    default_specie   // channel: [ val(default_specie) ] species to assign when metadata is missing or unknown
+    starsoloflag     // channel: [ val(starsoloflag) ] run STARsolo alignment after downloading
+    cellrangerflag   // channel: [ val(cellrangerflag) ] run Cell Ranger alignment after downloading (not yet implemented)
 
     main:
     // STEP 0.1: Init channels
+    original_fastq  = channel.empty()
+    runs            = channel.empty()
     bams            = channel.empty()
     sras            = channel.empty()
     versions        = channel.empty()
@@ -23,14 +32,15 @@ workflow REPROCESS10X {
     resolved_fastqs = channel.empty()
     starsolo        = channel.empty()
     soloqc          = channel.empty()
+    cellranger      = channel.empty()
 
     // STEP 0.2: Convert dataset list to channel
     datasets = datasetlist
         .splitCsv(header: true, sep: '\t')
         .map { row ->
-            def sample_list =  row.sample_id.split(',')
+            def sample_list =  row.containsKey("sample_id") && row.sample_id ? row.sample_id.split(',') : []
             [
-                [id: groupKey(row.dataset_id, sample_list.size())],
+                [id: sample_list.size() > 0 ? groupKey(row.dataset_id, sample_list.size()) : row.dataset_id],
                 row.sample_id
             ]
         }
@@ -51,39 +61,19 @@ workflow REPROCESS10X {
     
     versions = versions.mix(FETCH10XMETA.out.versions)
 
+    // STEP 2: Download datasets
     if (!metaonlyflag) {
-        // STEP 2: Download datasets
         DOWNLOAD10X(
             FETCH10XMETA.out.links,
-            wl_basedir
+            wl_basedir,
+            no_infer_specie,
+            default_specie
         )
 
-        // STEP2: Run STARsolo on fastq files for human and mouse samples
-        // Resolve effective specie for each sample:
-        //   --specie human/mouse  → override all samples to that specie
-        //   --specie auto         → use meta.specie from metadata; fall back to --default_specie if blank/NULL/UNKNOWN
-        def unknown_values = [null, '', 'NULL', 'UNKNOWN']
-        def specie_map = [
-            human: 'Homo sapiens',
-            mouse: 'Mus musculus',
-        ]
-        resolved_fastqs = DOWNLOAD10X.out.fastq
-            .map { meta, fastqs ->
-                def effective_specie
-                if (no_infer_specie) {
-                    effective_specie = default_specie ? specie_map.get(default_specie) : 'UNKNOWN'
-                } else {
-                    if (meta.specie in unknown_values) {
-                        effective_specie = default_specie ? specie_map.get(default_specie) : 'UNKNOWN'
-                        log.warn "Sample ${meta.id} (${meta.dataset_id}) has unknown species — using effective_specie='${effective_specie}'"
-                    } else if (meta.specie in specie_map.values()) {
-                        effective_specie = meta.specie
-                    } else {
-                        effective_specie = 'UNKNOWN'
-                    }
-                }
-                [meta + [specie: effective_specie], fastqs]
-            }
+        // Species is already resolved per sample inside DOWNLOAD10X, where the
+        // whole links.tsv is in scope — a sample's runs often carry conflicting
+        // or missing annotations that cannot be settled one run at a time.
+        resolved_fastqs = resolved_fastqs.mix(DOWNLOAD10X.out.fastq)
 
         // Group samples by specie
         fastqs = resolved_fastqs
@@ -95,41 +85,83 @@ workflow REPROCESS10X {
 
         fastqs.other
             .map { meta, _fastqs ->
-                log.warn "Sample ${meta.id} (${meta.dataset_id}) has unexpected species '${meta.specie}' — skipping STARsolo"
+                log.warn "Sample ${meta.id} (${meta.dataset_id}) has no usable species — skipping alignment"
                 [meta, _fastqs]
             }
-
         
-        // Run STARsolo on fastq files for human and mouse samples
-        STARSOLO10X_HUMAN(fastqs.human, human_reference, wl_basedir)
-        STARSOLO10X_MOUSE(fastqs.mouse, mouse_reference, wl_basedir)
-
-        // STEP 3: Collect outputs        
         // Collect channels
-        bams     = bams.mix(DOWNLOAD10X.out.bam)
-        sras     = sras.mix(DOWNLOAD10X.out.sra)
+        original_fastq = original_fastq.mix(DOWNLOAD10X.out.original_fastq)
+        runs           = runs.mix(DOWNLOAD10X.out.runs)
+        bams           = bams.mix(DOWNLOAD10X.out.bam)
+        sras           = sras.mix(DOWNLOAD10X.out.sra)
+        versions       = versions.mix(DOWNLOAD10X.out.versions)
+    }
+
+    // STEP 3.1: Run STARsolo
+    if (!metaonlyflag && starsoloflag) {
+        // Run STARsolo on fastq files for human and mouse samples
+        STARSOLO10X_HUMAN(fastqs.human, star_human_reference)
+        STARSOLO10X_MOUSE(fastqs.mouse, star_mouse_reference)
+
+        // Collect outputs
         starsolo = starsolo.mix(
             STARSOLO10X_HUMAN.out.mapping,
             STARSOLO10X_MOUSE.out.mapping
         )
-        soloqc   = soloqc.mix(
-            STARSOLO10X_HUMAN.out.qc_stats,
-            STARSOLO10X_MOUSE.out.qc_stats
-        )
+
+        // Collect mapping QC stats once per dataset, over every species it
+        // holds: both aligner branches carry the same dataset id, so QC'ing them
+        // separately would have each publish its own <dataset>.solo_qc.tsv to
+        // the same path. dataset_id's group size is the dataset's alignable
+        // sample count, set in DOWNLOAD10X once species are resolved.
+        samples_by_dataset = starsolo
+            .map { meta, sample_dir ->
+                def dataset_meta = [id: meta.dataset_id.getGroupTarget()]
+                tuple( groupKey(dataset_meta, meta.dataset_id.getGroupSize()), sample_dir )
+            }
+            .groupTuple(sort: 'hash', remainder: true)
+
+        REPROCESS10X_MAPPINGQC(samples_by_dataset)
+
+        soloqc   = soloqc.mix(REPROCESS10X_MAPPINGQC.out.tsv)
         versions = versions
             .mix(
-                DOWNLOAD10X.out.versions,
                 STARSOLO10X_HUMAN.out.versions,
-                STARSOLO10X_MOUSE.out.versions
+                STARSOLO10X_MOUSE.out.versions,
+                REPROCESS10X_MAPPINGQC.out.versions.first()
             )
     }
+
+    // STEP 3.2: Run Cell Ranger
+    if (!metaonlyflag && cellrangerflag) {
+        // Run Cell Ranger on fastq files for human and mouse samples
+        CELLRANGER_COUNT_HUMAN(fastqs.human, cr_human_reference)
+        CELLRANGER_COUNT_MOUSE(fastqs.mouse, cr_mouse_reference)
+
+        // Collect outputs
+        cellranger = cellranger.mix(
+            CELLRANGER_COUNT_HUMAN.out.mapping,
+            CELLRANGER_COUNT_MOUSE.out.mapping
+        )
+        
+        versions = versions
+            .mix(
+                CELLRANGER_COUNT_HUMAN.out.versions.first(),
+                CELLRANGER_COUNT_MOUSE.out.versions.first()
+            )
+    }
+
+
     
     emit:
-    metadata = metadata
-    fastq    = resolved_fastqs
-    bam      = bams
-    sra      = sras
-    starsolo = starsolo
-    soloqc   = soloqc
-    versions = versions
+    metadata       = metadata
+    original_fastq = original_fastq
+    runs           = runs
+    fastq          = resolved_fastqs
+    bam            = bams
+    sra            = sras
+    starsolo       = starsolo
+    soloqc         = soloqc
+    cellranger     = cellranger
+    versions       = versions
 }
