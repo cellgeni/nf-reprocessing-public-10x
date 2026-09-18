@@ -4,10 +4,13 @@ description: >
   Use when debugging a run of the nf-reprocessing-public-10x pipeline: collecting
   a finished run's logs, finding out what failed and why, classifying and
   attributing failures to datasets, checking a chemistry-inference or SRA2FASTQ
-  claim against the persisted work dirs, or writing the post-mortem report.
+  claim against the persisted work dirs, writing the post-mortem report,
+  drafting a dated issue and suggested diff in ./issues/ for a confirmed defect,
+  or notifying ab76 by email/Slack with the batch summary and project progress.
   Triggers on "triage/debug batch N", "what failed in the last run", a pasted
   Nextflow run name, an nf-work path, a "terminated with an error exit status"
-  line, or a request for a failure post-mortem.
+  line, a request for a failure post-mortem, "draft an issue"/"file this", or
+  "send an update"/"email me"/"notify".
 ---
 
 # Debugging a reprocessing run
@@ -59,6 +62,8 @@ Four rules override everything below.
 | **classify** | `classify.md` | you have the artifacts and want the shape of the failure set |
 | **verify** | `verify.md` | before believing any claim about read structure, chemistry or a guard |
 | **report** | `report.md` | the answer is going to a person, not just the terminal |
+| **file** | `issues.md` | a finding is a confirmed, actionable defect — draft it for the tracker |
+| **notify** | `notify.md` | a debug session is finished — save the LSF log, refresh the progress counter, email/Slack ab76 |
 | **compare** | `known-issues.md` | is this run's profile normal, and is this bug already known |
 | **look up** | `run-index.md` | which run was batch N, where is its evidence archived, is there a post-mortem — and `docs/post-mortems.md` for its link |
 
@@ -73,6 +78,8 @@ Four rules override everything below.
 | a run still in flight | `classify.md §console` |
 | "why was this sample rejected", a chemistry argument | `verify.md §whitelist`, then `docs/10x_chemistry_reference.md` |
 | "write it up", "post-mortem", "share the findings" | `report.md` |
+| "file this", "draft an issue", "open a ticket", a confirmed defect worth fixing | `issues.md` |
+| "email me", "notify ab76", "send an update", "post to slack" | `notify.md` |
 
 Not covered: fixing the aligners, the reference/whitelist layout, batching strategy beyond
 `data-map.md §batches`, and anything about delivery or iRODS. Say so rather than guessing.
@@ -147,7 +154,41 @@ reconciliation checks to run before publishing. Load the `artifact-design` skill
 
 Relay the headline findings in the chat reply as well as linking the page.
 
-## 6. Files
+## 6. Draft an issue for every confirmed defect
+
+Not conditional on writing a report — a session with no post-mortem still drafts one of these
+for any finding that is a real, actionable bug rather than a correct rejection. `issues.md` has
+the trigger condition, the naming (dated, since sessions stack up between reviews), the issue
+template, and the safe procedure for generating a real `git diff` without leaving the working
+tree modified.
+
+**Never run `gh issue create` or apply the suggested diff yourself.** Both files are drafts for
+the user to review; say so plainly in the chat reply, with the paths.
+
+## 7. Save the LSF log and notify
+
+Closing step for every debug session, whether or not it produced a report or an issue draft.
+`notify.md` has the three parts:
+
+```bash
+.claude/skills/reprocess-debug/bin/save_lsf_log.sh --batch 7          # onto NFS now, don't wait for §8
+.claude/skills/reprocess-debug/bin/track_progress.py --batch 7 --run elegant_lamarr --json /tmp/progress.json
+.claude/skills/reprocess-debug/bin/notify.py --to ab76@sanger.ac.uk --subject "..." --body-file /tmp/body.txt --slack
+```
+
+Email always sends (`smtplib.SMTP("localhost")`, no credentials needed). Slack only sends if
+`SLACK_BOT_TOKEN`/`CHANNEL_ID` resolve to something real — **never go looking for that token
+yourself or fabricate one**; if it's not configured, say so and send the email anyway. Its
+`slack_sdk` dependency is borrowed per-call through `uvx`, because this python has user
+site-packages disabled and `pip install --user` therefore installs something unimportable — see
+`notify.md`. Report what `notify.py`'s stderr actually says; "posted to channel" is the only line
+that means it went out.
+
+**Read `notify.md`'s caveat about the progress percentage before quoting it anywhere** — the
+target list mixes archives this pipeline never touches, so a low or flat number is not
+necessarily this repo falling behind.
+
+## 8. Files
 
 | Path | What |
 |---|---|
@@ -155,10 +196,16 @@ Relay the headline findings in the chat reply as well as linking the page.
 | `bin/triage.py` | manifest → classified, attributed, verdicts, `--json <path>` |
 | `bin/archive_run.sh` | a finished run → a complete record under `/nfs/cellgeni/reprocessing-runs/` |
 | `bin/resolve_run.sh` | sourced helper: batch → run name, LSF job id, report stamp |
+| `bin/save_lsf_log.sh` | copies a run's LSF driver log to NFS immediately, ahead of the full archive |
+| `bin/track_progress.py` | project-wide progress vs. the master target list — iRODS + local results, appends to `progress-counter.tsv` |
+| `bin/notify.py` | email (with `--to`) + Slack (if configured) — never fabricates a missing credential |
+| `bin/notify_run_done.sh` | the unattended "run finished, N left on Lustre" Slack ping, called from `scripts/run_reprocess.bsub` — not part of a debug session |
 | `references/data-map.md` | where everything lives, schemas, naming, size traps, batching |
 | `references/classify.md` | rule semantics, exit codes, attribution joins, live-run triage |
 | `references/verify.md` | work-dir probes, guards and thresholds, regression accessions |
 | `references/report.md` | the Artifact post-mortem |
+| `references/issues.md` | drafting a dated issue + suggested diff in `./issues/` for a confirmed defect |
+| `references/notify.md` | saving the LSF log, refreshing the progress counter, emailing/Slacking ab76 |
 | `references/known-issues.md` | baseline distributions, per-batch history, open bugs |
 | `references/run-index.md` | every run: name, session, failure counts, archive path |
 
@@ -168,7 +215,7 @@ layouts must be rejected), `archive-pathologies.md`, `reporting-upstream.md`,
 `failure-modes.md`, and `post-mortems.md` — the index of record for every published report's
 link, the one place to read a URL from or write a new one to.
 
-## 7. Archive the run when you are done
+## 9. Archive the run when you are done
 
 ```bash
 .claude/skills/reprocess-debug/bin/archive_run.sh --batch 6 --dry-run   # always first

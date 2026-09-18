@@ -146,6 +146,11 @@ p=P(); p.feed(open('data/failure-postmortem-batch6.html').read()); print('unclos
 
 * **Relay the findings in the chat reply too.** The artifact's contents are not shown to the
   user automatically — hand over the link *and* the headline conclusions.
+* **Flag that it's private.** Every artifact starts visible only to the publisher — there is no
+  publish-time flag for org-wide visibility, and no default that carries over from the last one.
+  Say so in the same chat reply: sharing it more broadly is a manual step only the owner can do,
+  from the page's own Share menu. Don't wait to be asked; the report exists to be read by more
+  than one person, so a reader finding it private is the failure mode to flag against.
 
 Never publish a page that impersonates a real person or organisation, or presents fabricated
 records as genuine. Reports on your own analysis of this pipeline are fine.

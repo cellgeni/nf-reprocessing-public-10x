@@ -37,19 +37,39 @@ for the account that published them.
 | 4 | `nauseous_spence` | 2026-09-01 14:55 | OK | `4645283e` | 47 | 44 | `batch4/nauseous_spence` | — (no stderr; see box above) |
 | 5 | `tender_brattain` | 2026-09-08 12:43 | OK | `f97ddf5e` | 48 | 48 ‡ | `batch5/tender_brattain` | [Batch 5 Reprocessing Post-Mortem](../../../../docs/post-mortems.md) |
 | 6 | `spontaneous_ampere` | 2026-09-08 23:25 | OK | `34653a63` | 16 | **7** | `batch6/spontaneous_ampere` | [Batch 6 Post-Mortem](../../../../docs/post-mortems.md) |
+| 7 | `elegant_lamarr` | 2026-09-14 16:20 | OK | `6d85067e` | 10 | **9** | `batch7/elegant_lamarr` — **LSF logs only**, `archive_run.sh` not yet run | [Batch 7 Post-Mortem](../../../../docs/post-mortems.md) |
+| 8 | `cheeky_cuvier` | 2026-09-15 12:14 | OK | `f5df7ff9` | 53 | **11** | `batch8/cheeky_cuvier` | [Batch 8 Post-Mortem](../../../../docs/post-mortems.md) |
+| 9 | `gigantic_hypatia` | 2026-09-16 22:40 | OK | `7721f85b` | 108 | **102** | `batch9/gigantic_hypatia` | [Batch 9 Post-Mortem](../../../../docs/post-mortems.md) |
 
 **Every one of these is recorded `OK`.** `errorStrategy 'ignore'` keeps failed tasks out of the
 exit status, so the status column is not a verdict — batch 6 is `OK` with 7 permanent failures.
 
-† **`Permanent` is only meaningful where a `failures<N>.tsv` manifest exists, and only batch 6
-has one.** For the others `triage.py` was run over the `failed<N>.log` / `failedjobs<N>.tsv`
+† **`Permanent` is only meaningful where a `failures<N>.tsv` manifest exists — batches 4, 6, 7
+and 8.** For the others `triage.py` was run over the `failed<N>.log` / `failedjobs<N>.tsv`
 pair, which cannot know which tasks later succeeded on retry, so its `permanent` field equals
-its `total`. Do not quote those totals as permanent-failure counts.
+its `total`. Do not quote those totals as permanent-failure counts. (Batch 4's manifest is
+complete on counts and empty on reasons; see the box above.)
 
 ‡ From the analysis recorded in `known-issues.md §later`, which reconciled recovery properly.
 Batch 3's 111 failed tasks / 92 permanent comes from there; the 73 in the archived
 `triage3.json` is the number of blocks in `failed3.log`, which is smaller. Prefer the
 `known-issues.md` figures for batch 3 and 5.
+
+> **Batch 9 needed its attribution tables rebuilt.** `data/tables/searchlist.tsv` is per-batch and
+> is overwritten by whichever run wrote it last — on 2026-09-18 it still held batch 5/6 runs, so
+> `triage.py` left 91 of batch 9's 102 permanent failures `unresolved` and reported 3 datasets
+> instead of 8. The run's own metadata is the fix, and it is published per dataset:
+> `cat results/batch<N>/metadata/*/links.tsv` has the identical 5-column schema, and
+> `data/tables/batches/batch<N>.csv` supplies sample→dataset. Pass both:
+>
+> ```bash
+> cat results/batch9/metadata/*/links.tsv > /tmp/searchlist9.tsv
+> .claude/skills/reprocess-debug/bin/triage.py --manifest data/tables/failures9.tsv \
+>   --searchlist /tmp/searchlist9.tsv \
+>   --datasets data/tables/batches/batch9.csv data/tables/allhumandatasets.tsv data/tables/datasets.tsv
+> ```
+>
+> A high `unattributed` count is the tell; `triage.py` prints it and names the files it used.
 
 ### Runs superseded by a resume
 
