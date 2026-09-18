@@ -19,6 +19,9 @@ readable in a browser rather than as a file on the farm. The write-up is built f
 
 | Report | Covers | Published | Archive |
 |---|---|---|---|
+| [Batch 9 Post-Mortem](https://claude.ai/artifact/7FWxkLzbvRiCBHnxpXf39r) | Batch 9, run `gigantic_hypatia` — 108 failed tasks, 102 permanent, 55 samples lost of 839; two thirds of the failures are correct rejections, and the expensive findings are elsewhere — 9 good samples lost to a STAR segfault decided by a one-point margin in a test alignment, and **38 samples that never failed** published as near-empty matrices because nothing gates a sample on whether it mapped | 2026-09-18 | not yet archived |
+| [Batch 8 Post-Mortem](https://claude.ai/artifact/EbcT6NhroVDPYwLWtypFYm) | Batch 8, run `cheeky_cuvier` — 53 failed tasks, 11 permanent, 6 samples and 2 dataset accessions lost; 10 of the 11 are one submission that registered each library's barcode and cDNA reads as separate SRA runs, and a fifth of the alignment compute went on duplicate dataset accessions | 2026-09-16 | `batch8/cheeky_cuvier/postmortem.html` |
+| [Batch 7 Post-Mortem](https://claude.ai/code/artifact/42c9dcfc-ea39-4a24-a425-c58ef3cadfb9) | Batch 7, run `elegant_lamarr` — 10 failed tasks, 9 permanent, zero datasets lost; 8 trace to one missing value in the truncated-UMI chemistry guard, 1 is a genuinely near-empty source FASTQ | 2026-09-15 | not yet archived |
 | [Batch 6 Post-Mortem](https://claude.ai/code/artifact/6f5e2eaf-b5e4-4476-b074-79683eec2333) | Batch 6, run `spontaneous_ampere` — 16 failed tasks, 7 permanent; two datasets emptied, and 98% of the wasted compute in two samples | 2026-09-14 | `batch6/spontaneous_ampere/postmortem.html` |
 | [Batch 5 Reprocessing Post-Mortem](https://claude.ai/code/artifact/9d667def-0edb-4278-9a6d-50bc49c92931) | Batch 5, run `tender_brattain` — 48 failed tasks, 48 permanent | 2026-09-08 | `batch5/tender_brattain/postmortem.html` |
 | [Run 337224 Post-Mortem](https://claude.ai/code/artifact/7d89d7e0-705a-4c5b-bdb3-621615a9504c) | LSF job 337224 / Nextflow run `evil_volhard`, the REQ-74217 follow-up. Source of the GSE247111 shared-BioSample library merge | 2026-09-01 | not archived — ran in a different working directory |
@@ -32,7 +35,7 @@ the trace, per-task tool stderr and triage manifest the report was written from,
 own `manifest.txt` — which since 2026-09-14 carries the report's URL too, so the archive says
 where its readable copy is rather than only that one exists.
 
-Three of the seven have an HTML snapshot in the archive; the rest do not, either because the run was
+Four of the ten have an HTML snapshot in the archive; the rest do not, either because the run was
 never archived here or — for the August baseline — because `archive_run.sh` only recognises the
 `batch<N>`/job-id source names. Where the Archive column says otherwise, the artifact is the only
 copy outside scratch.
