@@ -5,7 +5,7 @@ Distilled from `docs/agent_debug.md` §5, §8, §9 and §10.
 **Work dirs persist until someone deletes them, and someone has.** `cleanup = false` in
 `nextflow.config`, so Nextflow keeps them — but **the work dirs for batches 1-5 were deleted
 (confirmed 2026-09-14)**, and batches 6-19 followed by 2026-10-02 (0 of their 818 failed-task
-dirs remain; 20 and 21 are intact). Everything in this file works only on runs still on
+dirs remain, and batches 20-21's 134 went later the same day). Everything in this file works only on runs still on
 scratch; for the rest there is nothing left to walk back to.
 
 Check first, and do not promise a measurement you cannot take:

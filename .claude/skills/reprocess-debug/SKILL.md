@@ -50,8 +50,8 @@ Five rules override everything below.
 3. **Measure, do not infer — where you still can.** Several confident log-based conclusions were
    wrong until checked against the FASTQs, because a failure routinely surfaces two stages
    downstream of its cause wearing an unrelated message. See `verify.md §walkback`. **But the
-   work dirs for batches 1-5 were deleted (confirmed 2026-09-14), and those for batches 6-19 by
-   2026-10-02 (0 of 818 failed-task dirs left)**, so walk-back works only on runs still on
+   work dirs for batches 1-5 were deleted (confirmed 2026-09-14), and those for batches 6-21 by
+   2026-10-02 (0 of 952 failed-task dirs left)**, so walk-back works only on runs still on
    scratch; for the rest the archive under `/nfs/cellgeni/reprocessing-runs/` is the whole of the
    surviving evidence. Check the dir exists before promising to verify anything.
 4. **Mind the sizes.** The Bash tool timeout is 120 s; `data/tables/failed2.log` is 793 MB;

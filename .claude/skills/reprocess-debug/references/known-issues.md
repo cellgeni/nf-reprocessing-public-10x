@@ -81,12 +81,13 @@ it is a reason to run §4.
   message); the `12` itself is a judgment call, and the allowlist design will need widening again.
   `infer_10x_run.py:155` carries the same constant and is not the wired script — settle whether it
   is dead code, as the two `sra2fastq` modules were.
-* **Samples with no resolved chemistry still reach the aligner.** Six batch 12-13 samples
-  (GSE224986: `GSM7036555`-`561`) carry `WL = Undef` in the QC table and were aligned with no
-  whitelist, so every barcode became a cell: **6,794,880 cells, 1 median feature, `exon_u` 0** —
-  the full 3'v3 barcode list published as a matrix. Expensive in storage and worthless as data.
-  Not separately drafted; a sample that reaches STARSOLO without a whitelist should not reach
-  STARSOLO.
+* **Samples with zero gene-mapped reads are published with no filtered matrix, and the QC table
+  misreports them** (GitHub #17; corrected 2026-10-02). Six batch 12-13 samples (GSE224986:
+  `GSM7036555`-`559` and `561`; `560` is a normal row) show `WL = Undef`, **6,794,880 cells**,
+  1 median feature, `exon_u` 0. This was first read as "aligned with no whitelist", and that
+  was wrong. The driver log shows all six got `--wl gex_3pv3_family`. The values are what
+  `starsolo qc` prints from its plate-based branch when `output/Gene/filtered/` is missing:
+  `Undef` is hard-coded and 6,794,880 is the raw v3 barcode list, not a cell count.
 
 * **Chemistry inference has no upper bound on the barcode read length.**
   `gex_observed_umi_len()` in `infer_10x_run_recommended.py` accepts any read where

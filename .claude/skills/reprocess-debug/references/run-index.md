@@ -14,10 +14,10 @@ for the account that published them.
 
 `.nextflow/history` is the authority on the first five columns; see `data-map.md §history`.
 
-> ### The work directories for batches 1-19 are gone
+> ### The work directories for batches 1-21 are gone
 >
 > Batches 1-5 deleted, confirmed 2026-09-14; **batches 6-19 followed by 2026-10-02** — 0 of
-> their 818 failed-task work dirs remain, while batches 20 and 21 still have all 134 of theirs.
+> their 818 failed-task work dirs remain — and batches 20-21's 134 were deleted later the same day.
 > **The archive is the only surviving record for those runs**, and no claim about them can be
 > re-verified against a FASTQ any more — `verify.md §walkback` and SKILL.md rule 3 ("measure,
 > do not infer") apply only to runs still on scratch. Check with the one-liner at the top of

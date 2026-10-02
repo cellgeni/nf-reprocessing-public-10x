@@ -18,7 +18,7 @@ any non-trivial change:
   skill: collecting a finished run's logs (`bin/collect_run_logs.sh`), classifying and
   attributing failures (`bin/triage.py`), exit-code meanings per process, how to verify claims
   against the `nf-work` dirs where they survive (batches 1-5 were deleted 2026-09-14, and
-  batches 6-19 by 2026-10-02 — only the newest runs keep theirs),
+  batches 6-21 by 2026-10-02 — only a run still in flight keeps them),
   known-good regression accessions, and open issues found
   but not fixed. Also `references/run-index.md` — every run's name, session, archive path and
   failure counts, so none of that has to be hunted for. Supersedes the old `docs/agent_debug.md`,
@@ -74,7 +74,8 @@ Tags available: `geo`, `arrayexpress`, `bioproject`, `enafq`, `orifq`, `bam`, `s
 
 Iterating on chemistry inference is much faster by calling the Python directly against a
 persisted work dir than by running the pipeline — see §9 of `docs/agent_debug.md`. The work
-dirs only survive for the most recent runs: as of 2026-10-02, batches 20-21 and nothing older.
+dirs only survive for the run in flight: batches 20-21's were deleted on 2026-10-02 too, so nothing
+up to batch 21 can be re-measured.
 
 ## Architecture
 
