@@ -23,6 +23,7 @@ an environment that does have slack_sdk pays nothing for this.
 """
 import argparse
 import os
+import re
 import shutil
 import smtplib
 import subprocess
@@ -31,6 +32,28 @@ from email.message import EmailMessage
 from pathlib import Path
 
 DEFAULT_FROM = "noreply-reprocessing@cellgeni-su"
+
+# Everyone who should get a batch notification. This list is the single place to
+# add or drop a recipient: --team expands to it, and the commands in SKILL.md §8
+# and references/notify.md §3 use --team rather than spelling addresses out, so a
+# name added here reaches every future notification without editing any prose.
+# ap41 was in none of those invocations until 2026-09-22 and therefore silently
+# received nothing for batches 6-9 — the mail relay was never the problem.
+TEAM = ["ab76@sanger.ac.uk", "ap41@sanger.ac.uk"]
+
+
+def resolve_recipients(to: list[str], team: bool) -> list[str]:
+    """Flatten comma- or space-separated --to values, add TEAM if asked, dedupe.
+
+    Accepting "a@x,b@y" as a single token matters because notify_run_done.sh's
+    --to takes one shell argument and passes it straight through.
+    """
+    out = []
+    for item in ([*to, *TEAM] if team else to):
+        for addr in re.split(r"[,\s]+", item):
+            if addr and addr not in out:
+                out.append(addr)
+    return out
 
 
 def load_env_file(path: str) -> dict:
@@ -129,8 +152,13 @@ def send_slack(text: str, token: str | None, channel: str | None) -> bool:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--to", nargs="+", default=[],
-                    help="Recipient email address(es). Omit for a Slack-only message (--slack "
-                         "with --slack-text/--slack-text-file), which is what notify_run_done.sh does")
+                    help="Recipient email address(es); a comma-separated list in a single "
+                         "argument works too. Omit for a Slack-only message (--slack with "
+                         "--slack-text/--slack-text-file), which is what notify_run_done.sh does")
+    ap.add_argument("--team", action="store_true",
+                    help="Add the standard batch-notification recipients (" + ", ".join(TEAM) +
+                         ") to --to. This is the intended way to send a batch notification — "
+                         "spelling a single address out by hand is how a recipient goes missing")
     ap.add_argument("--subject", default=None, help="Required when --to is given")
     ap.add_argument("--body", default=None, help="Message body text (mutually exclusive with --body-file)")
     ap.add_argument("--body-file", default=None)
@@ -144,11 +172,12 @@ def main() -> int:
                           "if they are not already in the environment")
     ap.add_argument("--dry-run", action="store_true", help="Print what would be sent, send nothing")
     args = ap.parse_args()
+    recipients = resolve_recipients(args.to, args.team)
 
-    if not args.to and not args.slack:
-        ap.error("nothing to send: give --to for email, --slack for Slack, or both")
-    if args.to and not args.subject:
-        ap.error("--subject is required with --to")
+    if not recipients and not args.slack:
+        ap.error("nothing to send: give --to/--team for email, --slack for Slack, or both")
+    if recipients and not args.subject:
+        ap.error("--subject is required with --to/--team")
     if args.body and args.body_file:
         ap.error("--body and --body-file are mutually exclusive")
 
@@ -160,21 +189,21 @@ def main() -> int:
 
     body = args.body if args.body is not None else (
         Path(args.body_file).read_text() if args.body_file else None)
-    if args.to and body is None:
-        ap.error("exactly one of --body or --body-file is required with --to")
+    if recipients and body is None:
+        ap.error("exactly one of --body or --body-file is required with --to/--team")
     if args.slack and slack_text is None and body is None:
         ap.error("--slack with no --to needs --slack-text or --slack-text-file")
     slack_text = slack_text or body  # only a same-text fallback if neither was given at all
 
     if args.dry_run:
-        if args.to:
-            print(f"--- would email {', '.join(args.to)} ---\nSubject: {args.subject}\n\n{body}\n---")
+        if recipients:
+            print(f"--- would email {', '.join(recipients)} ---\nSubject: {args.subject}\n\n{body}\n---")
         if args.slack:
             print(f"--- would post to Slack ---\n{slack_text}\n---")
         return 0
 
-    if args.to:
-        send_email(args.to, args.subject, body, args.attach, args.sender)
+    if recipients:
+        send_email(recipients, args.subject, body, args.attach, args.sender)
 
     if args.slack:
         env = {}

@@ -4,8 +4,9 @@ Distilled from `docs/agent_debug.md` §5, §8, §9 and §10.
 
 **Work dirs persist until someone deletes them, and someone has.** `cleanup = false` in
 `nextflow.config`, so Nextflow keeps them — but **the work dirs for batches 1-5 were deleted
-(confirmed 2026-09-14)**. Everything in this file works from batch 6 onward; for earlier runs
-there is nothing left to walk back to.
+(confirmed 2026-09-14)**, and batches 6-19 followed by 2026-10-02 (0 of their 818 failed-task
+dirs remain; 20 and 21 are intact). Everything in this file works only on runs still on
+scratch; for the rest there is nothing left to walk back to.
 
 Check first, and do not promise a measurement you cannot take:
 
@@ -91,11 +92,150 @@ spend time on it without a specific reason.
 | `--min-barcode-usable-fraction` | 0.90 | fraction that must reach `cb_len` — the correctness bar |
 | `--warn-barcode-umi-fraction` | 0.95 | below this, warn about reads STAR will drop for a short UMI |
 | `--min-bio-usable-fraction` | 0.85 | was 0.98 |
-| `--min-gex-r2-length` | 60 | what rejects ADT/HTO libraries |
+| `--min-bio-read-length` | 40 | the real floor for a biological read, and what actually rejects a 20–25 bp ADT/HTO library |
+| `--min-gex-r2-length` | 60 | **tie-breaker only** — applied when more than one candidate clears 40 bp. A single candidate below 60 bp is accepted, not rejected |
 
 The whitelist summary table in the log has an `N-drop` column — sampled reads set aside for an N
 in the barcode. A large `N-drop` with a low match rate is the head-sampling artifact, not bad
 data.
+
+The `--min-gex-r2-length` row is worth reading twice, because the table used to say it was "what
+rejects ADT/HTO libraries" and that is wrong. In
+`modules/cellgeni/rename10xrun/resources/usr/bin/infer_10x_run_recommended.py:956-963`:
+
+```python
+long_files = [i for i in remaining if i.common_length >= args.min_bio_read_length]   # 40
+if allow_excluded:
+    preferred = [i for i in long_files if i.common_length >= args.min_gex_r2_length]  # 60
+    if len(preferred) == 1:                  # a lone sub-60bp candidate never gates
+        long_files = preferred
+bio = choose_one(long_files, "GEX biological R2 read")
+```
+
+A run with exactly one non-barcode read never reaches the 60 bp test: 20 bp and 25 bp reads are
+rejected by the 40 bp floor, and a 42 bp read is accepted as GEX.
+
+> **Do not try to separate feature-barcode libraries from GEX by read length.** Batch 9 measured
+> both ends. GSE215253's two junk samples have a 42 bp biological read; `GSM6660161` (GSE216187,
+> 56 bp), `GSM6668926` (GSE216329, 55 bp), `GSM6681083` (GSE216602, 55 bp) and `GSM6681046`
+> (GSE216595, 55 bp) map at 78–94% with 1270–3165 median features. Raising the floor toward 60
+> discards four good datasets to catch one bad pair. Geometry cannot do it either — GSE216914's
+> CSP and VDJ libraries of one sample share an identical `10/10/26/90` layout and map at 0.9%
+> and 93.9%. Use `§qc` instead.
+
+## §qc — screening the outputs
+
+Everything above this section is about samples that failed. This one is about samples that did
+not, and it exists because batch 9 published 38 near-empty matrices with no task failing anywhere
+and batch 10 published 75 — 4.8% and 10.0% of everything they aligned. `triage.py` cannot see
+them; the only record is the QC table, and that is deleted with `results/` when the batch is
+uploaded.
+
+```bash
+# de-duplicate on Sample first — see the trap below
+awk -F'\t' 'NR>1 && !seen[$2]++ && $17+0 < 0.05 && $8+0 < 100 {print $1, $2, $14, $17, $8}' \
+    results/batch10/mapping_qc_stats.tsv
+```
+
+Columns: `$1` Dataset, `$2` Sample, `$8` Med_nFeature, `$14` all_u+m, `$17` exon_u, `$19` full_u.
+
+**Both terms are screening thresholds from two batches, not verdicts.** Treat a hit as "look at
+this", not "this is junk".
+
+* `exon_u < 0.05` does the work. Batch 9: 38 unique samples, maximum 0.0398, against a minimum of
+  0.0597 across the other 746. Batch 10: 76.
+* `Med_nFeature < 100` exists to spare single-nucleus data. On its own, `exon_u` called
+  `GSM6729514` (GSE217892, batch 10) junk — `exon_u` 0.0425, but `all_u+m` 0.968, `full_u` 0.468
+  and **583 median features**. snRNA-seq reads are intronic, so exonic is low while GeneFull is
+  high. The second term drops that one sample and nothing else: batch 9 still flags all 38,
+  batch 10 flags 75 rather than 76.
+* **`full_u` is not the right second term**, tempting as it looks from that example. It would
+  clear 7 of batch 9's 38 — GSE216999's cell-hashing libraries reach `full_u` 0.08-0.38 on 1-5
+  median features. Tested and rejected; do not re-derive it.
+
+**Corroborate with the test alignment, which is cheaper and earlier.** Before aligning, the
+wrapper runs two 200,000-read test alignments to pick a strand and prints the result into the
+STARsolo task's `.command.err`:
+
+```
+[WARN]  Low GeneFull mapping: forward=0%, reverse=0%
+```
+
+`max(forward, reverse) < 5%` flagged 31 of the 38 with zero false alarms. Note that 147 of batch
+9's 917 completed tasks carry that warning at all, so the *warning* is not the signal — the
+near-zero *value* is. This is also the number a future gate should use, since it is available
+before the expensive alignment rather than after.
+
+**Confirm what the library actually is from GEO, in one step.** A flagged sample is usually a
+feature-barcode library, and the type is in the free-text title even though the structured
+fields are useless:
+
+```bash
+grep -E "^!Sample_title|^!Sample_geo_accession" \
+    results/batch9/metadata/GSE216999/GSE216999_family.soft | head
+```
+
+Look for `cell hashing`, `hashtag`, `HT`, `CSP`, `ADT`, `gRNA`, `enrichment PCR`,
+`Custom library`, `VDJ`. Every one of batch 9's 38 is
+`!Sample_library_strategy = RNA-Seq` and `!Sample_library_source = transcriptomic single cell`,
+so the structured metadata will never filter them.
+
+**What is not a hit.** Real data that merely maps low. GSE215908's 16 samples sit at `exon_u`
+0.11–0.14 with 500–2300 median features and 2700–11500 cells — plausibly a xenograft or a
+mislabelled organism, but usable data, and correctly untouched by the 0.05 threshold. Do not
+widen the threshold to catch them; that is a different question, and
+`docs/archive-pathologies.md` is where it is recorded.
+
+### The other half: samples that never reached a task
+
+The screen above only sees what was aligned. A sample dropped earlier leaves nothing at all — no
+task, no work dir, no QC row. Compare what the batch asked for against what the run emitted:
+
+```bash
+python3 - <<'EOF'
+import csv, os
+B = "10"
+# batch22+ live in batches_deduplicated/; the never-run batches/batch22-49 share the names
+bt = next(p for p in (f"data/tables/batches_deduplicated/batch{B}.csv",
+                      f"data/tables/batches/batch{B}.csv") if os.path.exists(p))
+for r in csv.DictReader(open(bt), delimiter="\t"):
+    ds  = r["dataset_id"]
+    req = {s.strip() for s in r["sample_id"].split(",") if s.strip()}
+    p   = f"results/batch{B}/metadata/{ds}/links.tsv"
+    if not os.path.exists(p):
+        print(f"{ds}: no links.tsv at all ({len(req)} samples)"); continue
+    seen = {l.split("\t")[4].strip() for l in open(p) if len(l.split("\t")) >= 5}
+    if req - seen:
+        print(f"{ds}: {len(req & seen)}/{len(req)} emitted, missing {sorted(req - seen)}")
+EOF
+```
+
+Batch 10 found GSE218936 emitting 2 of 8 requested samples with `FETCH10XMETA` exiting 0, because
+all eight GSMs share two run sets of four. The survivor was then aligned against all four runs of
+its group, so its matrix pools four experimental conditions (1G/µG × stim/unstim) under one
+sample's name — at 96% mapping and 1865 median features, i.e. looking perfect. See
+`issues/2026-09-19-batch10-metadata-drops-samples-silently.md`.
+
+Two read-outs of that check are benign and should not be reported as losses:
+
+* **`no links.tsv at all`** where the dataset's `FETCH10XMETA` task genuinely failed — it is
+  already in the failure list. Batch 9's GSE215121 is this case.
+* **A duplicate dataset row**, where the same samples are emitted under the pair's other
+  accession. Check the sibling before calling anything lost.
+
+Cell count is *not* a detector for the pooled case. Batch 10's two pooled matrices hold 32709 and
+31193 cells against a batch median of 7471, but that is only about the 97th percentile and the
+batch's largest legitimate sample has 70564.
+
+Two operational traps for the first screen:
+
+* **De-duplicate on `Sample` before counting anything.** The table carries one row per dataset
+  unit, and duplicate dataset accessions mean a sample appears twice: batch 9, 917 rows for 784
+  samples; batch 10, 973 for 748. Batch 10's 75 flagged samples first present as 97 rows.
+* **Run this before the batch is cleaned up.** `results/<outdir>/` does not survive upload — in
+  September 2026 only batches 9 and 10 still had one. `archive_run.sh` preserves
+  `mapping_qc_stats.tsv` and the run's concatenated `links.tsv`, but only for runs archived
+  after that was added; for batches 1–8 the output evidence is gone.
 
 `SRA2FASTQ` fails rather than emitting a partial run. Its messages, all of which the classifier
 recognises:

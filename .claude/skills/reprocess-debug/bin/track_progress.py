@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
 """
-Project-wide reprocessing progress against the master target list.
+Reprocessing progress against the target list: by default the deduplicated
+to-do list in data/tables/batches_deduplicated/ (batch22 onward, every human
+sample in All_10x.sample_table.tsv that was neither on iRODS, nor in local
+results, nor in a batch already run when the list was built, one entry per
+sample). The percentage is therefore "how much of what was left has been done",
+not a project-wide completion rate. --target still accepts the old header-less
+7-column sample tables (e.g. the March 2026 Not_done_hs_10x.sample_table.tsv).
 
 "Done" means either of two things, checked independently and unioned:
   - the sample's collection already exists on iRODS under
     <irods-base>/<dataset>/<sample_id> (uploaded by any pipeline, not just
-    this one — the master list is not scoped to this repo)
+    this one, so a sample uploaded by another route also counts)
   - this repo's own results/*/starsolo/<dataset>/<sample_id>/ has completed
     STARsolo output (same heuristic as scripts/subset_studies.py:
     output/Gene/ or Log.final.out present)
 
-The join is by sample_id (the target list's first column) alone: for the
+The join is by sample_id alone: for the
 iRODS side, against the *leaf* directory name of every two-level-deep
 collection under --irods-base, regardless of which dataset folder it sits
 under; for the local side, against every results/*/starsolo/*/<id> across
 all batches in this repo, not just the batch just debugged. This is a
-best-effort join, not a guarantee — see SKILL.md / references/notify.md
-for the caveat about non-GEO accessions in the target list that this repo's
-pipeline may never touch.
+best-effort join, not a guarantee — see references/notify.md §2.
 
 Appends one dated row to --counter-file and prints a short summary (also
 available as --json) for the notify step to put in the email/Slack message.
@@ -32,7 +36,8 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_TARGET = "/nfs/cellgeni/projects/reprocessing/irods_datasets/Not_done_hs_10x.sample_table.tsv"
+REPO = Path(__file__).resolve().parents[4]
+DEFAULT_TARGET = str(REPO / "data/tables/batches_deduplicated")
 DEFAULT_IRODS_BASE = "/archive/cellgeni/datasets"
 DEFAULT_CACHE = "/nfs/cellgeni/reprocessing-runs/.cache/irods-datasets-collections.txt"
 DEFAULT_COUNTER = "/nfs/cellgeni/reprocessing-runs/progress-counter.tsv"
@@ -44,14 +49,36 @@ COUNTER_HEADER = [
 
 
 def read_target_samples(path: str) -> list[str]:
-    """First column of the master tab-separated sample table, one id per row."""
-    samples = []
-    with open(path, encoding="utf-8", errors="replace") as f:
-        for line in f:
-            parts = line.rstrip("\n").split("\t")
-            if parts and parts[0].strip():
-                samples.append(parts[0].strip())
-    return samples
+    """
+    Unique sample ids, in first-seen order, from any of:
+      - a directory of batch*.csv tables (dataset_id/sample_id, tab-separated),
+      - one such dataset_id/sample_id table,
+      - a header-less sample table whose first column is the sample id
+        (All_10x / Not_done_hs_10x layout). A first column naming several GSMs
+        for one SRA sample counts once, as its first GSM, matching
+        scripts/make_dedup_batches.py.
+    """
+    p = Path(path)
+    files = sorted(p.glob("batch*.csv")) if p.is_dir() else [p]
+    if not files:
+        sys.exit(f"target {path}: no batch*.csv files in it")
+    seen: dict[str, None] = {}
+    for fn in files:
+        with open(fn, encoding="utf-8", errors="replace") as f:
+            first = f.readline()
+            if first.startswith("dataset_id\t"):
+                for line in f:
+                    parts = line.rstrip("\r\n").split("\t")
+                    if len(parts) >= 2:
+                        for s in parts[1].split(","):
+                            if s.strip():
+                                seen.setdefault(s.strip(), None)
+            else:
+                for line in [first, *f]:
+                    col = line.rstrip("\r\n").split("\t")[0].strip()
+                    if col:
+                        seen.setdefault(col.split(",")[0].strip(), None)
+    return list(seen)
 
 
 def refresh_irods_cache(cache_path: str, irods_base: str, max_age_s: int) -> bool:
@@ -135,7 +162,9 @@ def append_counter_row(counter_file: str, row: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--target", default=DEFAULT_TARGET, help="Master dataset_id/sample_id/.../species table")
+    ap.add_argument("--target", default=DEFAULT_TARGET,
+                    help="Directory of batch tables, a dataset_id/sample_id table, or a 7-column sample table "
+                         "(default: data/tables/batches_deduplicated)")
     ap.add_argument("--irods-base", default=DEFAULT_IRODS_BASE)
     ap.add_argument("--irods-cache", default=DEFAULT_CACHE)
     ap.add_argument("--cache-max-age", type=int, default=CACHE_MAX_AGE_S,
@@ -197,10 +226,17 @@ def main() -> int:
     if not args.dry_run:
         append_counter_row(args.counter_file, row)
 
+    # A delta across a change of target compares two different denominators —
+    # the switch to batches_deduplicated took done_total from 18,594 to ~0 — so
+    # report it as a change of target rather than as progress.
     delta = None
+    target_changed = False
     if last:
         try:
-            delta = row["done_total"] - int(last["done_total"])
+            if int(last["total_target"]) != total:
+                target_changed = True
+            else:
+                delta = row["done_total"] - int(last["done_total"])
         except (KeyError, ValueError):
             delta = None
 
@@ -209,6 +245,7 @@ def main() -> int:
         "target_file": args.target,
         "irods_note": irods_note,
         "delta_done_since_last": delta,
+        "target_changed_since_last": target_changed,
         "previous_measurement": last,
     }
 
@@ -221,6 +258,9 @@ def main() -> int:
     if delta is not None:
         sign = "+" if delta >= 0 else ""
         print(f"change since last measurement ({last['timestamp']}): {sign}{delta}", file=sys.stderr)
+    elif target_changed:
+        print(f"change since last measurement: n/a — the target changed "
+              f"({last['total_target']} -> {total} samples) since {last['timestamp']}", file=sys.stderr)
     if not args.dry_run:
         print(f"appended to {args.counter_file}", file=sys.stderr)
 

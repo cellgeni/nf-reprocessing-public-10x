@@ -14,7 +14,7 @@ wins and is taken from that script; changing the order changes the counts, so
 treat the categories as a triage aid, not a taxonomy. If a count matters, read
 the blocks.
 """
-import argparse, collections, csv, json, os, re, sys
+import argparse, collections, csv, glob, json, os, re, sys
 
 # --------------------------------------------------------------------- rules
 # First match wins. Most specific first.
@@ -134,9 +134,43 @@ def base(tag):
     return tag.split(":")[0].replace("Loading ", "").strip()
 
 
-def load_attribution(repo, searchlist, datasets):
+def batch_of(source):
+    """Batch number out of a manifest/log filename, or None.
+
+    failures9.tsv -> 9, failed5.log -> 5. Anything else -> None, which is what
+    keeps reports/failures_<date>.tsv (the batch-3 regression fixture) on the
+    old code path.
+    """
+    if not source:
+        return None
+    m = re.fullmatch(r"(?:failures|failed|failedjobs)(\d+)\.(?:tsv|log)",
+                     os.path.basename(source))
+    return m.group(1) if m else None
+
+
+def load_attribution(repo, searchlist, datasets, source=None):
     run2sample, run2type = {}, {}
-    cands = [searchlist] if searchlist else [
+
+    # The run publishes its own attribution tables, and they beat the shared ones:
+    # data/tables/searchlist.tsv is per-batch and is overwritten by whichever run
+    # wrote it last, so on any run but the newest it silently attributes nothing.
+    # (Batch 9: 91 of 102 unresolved, 3 datasets reported instead of 8.) The
+    # per-dataset links.tsv has the identical 5-column header-less schema. Both
+    # of these vanish with results/ when the batch is uploaded, so this is
+    # best-effort by design — absent, it falls back to exactly the old behaviour.
+    own_lists, own_datasets = [], []
+    N = batch_of(source)
+    if N:
+        own_lists = sorted(glob.glob(
+            os.path.join(repo, f"results/batch{N}/metadata/*/links.tsv")))
+        # batch22 onward come from the deduplicated list. The old, never-run
+        # data/tables/batches/batch22-49 share those names, so take only the
+        # first that exists, never both.
+        own_datasets = [p for p in (os.path.join(repo, f"data/tables/{d}/batch{N}.csv")
+                                    for d in ("batches_deduplicated", "batches"))
+                        if os.path.exists(p)][:1]
+
+    cands = [searchlist] if searchlist else own_lists + [
         os.path.join(repo, "data/tables/searchlist.tsv"),
         os.path.join(repo, "data/searchlist.tsv"),
     ]
@@ -151,17 +185,28 @@ def load_attribution(repo, searchlist, datasets):
                 run2sample.setdefault(p[0], p[4])
                 run2type.setdefault(p[0], p[3])
 
-    # allhumandatasets first: 4602 datasets vs datasets.tsv's 266. The other way
-    # round left 1336 of 1814 failures unattributed.
+    # The run's own batch table first, then the deduplicated to-do list (one
+    # dataset per sample), then allhumandatasets for batches 1-21: 4602 datasets
+    # vs datasets.tsv's 266. The other way round left 1336 of 1814 failures
+    # unattributed.
     sample2dataset = {}
-    for fn in (datasets or [os.path.join(repo, "data/tables/allhumandatasets.tsv"),
-                            os.path.join(repo, "data/tables/datasets.tsv")]):
+    dedup = sorted(glob.glob(os.path.join(repo, "data/tables/batches_deduplicated/batch*.csv")))
+    dedup_n, dedup_at = 0, None
+    for fn in dict.fromkeys(datasets or own_datasets + dedup + [
+            os.path.join(repo, "data/tables/allhumandatasets.tsv"),
+            os.path.join(repo, "data/tables/datasets.tsv")]):
         if not os.path.exists(fn):
             continue
-        used.append(fn)
+        if fn in dedup and fn not in own_datasets:
+            dedup_n += 1            # reported once below, not file by file
+            dedup_at = len(used) if dedup_at is None else dedup_at
+        else:
+            used.append(fn)
         for r in csv.DictReader(open(fn, errors="replace"), delimiter="\t"):
             for s in (r.get("sample_id") or "").split(","):
                 sample2dataset.setdefault(s.strip(), r["dataset_id"])
+    if dedup_n:
+        used.insert(dedup_at, os.path.join(repo, f"data/tables/batches_deduplicated/*.csv ({dedup_n} files)"))
     return run2sample, run2type, sample2dataset, used
 
 
@@ -205,7 +250,7 @@ def main():
         return 0
 
     run2sample, run2type, sample2dataset, used = load_attribution(
-        args.repo, args.searchlist, args.datasets)
+        args.repo, args.searchlist, args.datasets, source)
 
     def dataset_of(tag):
         t = base(tag)
@@ -221,7 +266,20 @@ def main():
     recov = [r for r in rows if r["recovered"] != "no"]
 
     print(f"source               : {source}")
-    print(f"attribution tables   : {', '.join(os.path.relpath(u, args.repo) for u in used) or 'none found'}")
+    # A run's own links.tsv comes as one file per dataset — 117 of them for batch 9 —
+    # so collapse them to the glob rather than printing an unreadable line.
+    shown, links_n, links_pat = [], 0, None
+    for u in used:
+        rel = os.path.relpath(u, args.repo)
+        m = re.fullmatch(r"(results/[^/]+/metadata)/[^/]+/links\.tsv", rel)
+        if m:
+            links_n += 1
+            links_pat = f"{m.group(1)}/*/links.tsv"
+        else:
+            shown.append(rel)
+    if links_pat:
+        shown.insert(0, f"{links_pat} ({links_n} datasets)")
+    print(f"attribution tables   : {', '.join(shown) or 'none found'}")
     print(f"failed tasks         : {len(rows)}")
     print(f"  permanently failed : {len(perm)}")
     print(f"  recovered on retry : {len(recov)}")

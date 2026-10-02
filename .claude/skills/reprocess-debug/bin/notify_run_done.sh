@@ -25,7 +25,7 @@ set -uo pipefail
 FS="/lustre/scratch124/cellgen"
 GROUP="cellgeni"
 SLACK_ENV_FILE="/lustre/scratch124/cellgen/cellgeni/aljes/reprocessing_slack_bot/.env"
-BATCH="" ; RUN="" ; EXIT_CODE="" ; TO="" ; DRY_RUN=0
+BATCH="" ; RUN="" ; EXIT_CODE="" ; TO="" ; TEAM=0 ; DRY_RUN=0
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
@@ -35,6 +35,7 @@ usage: notify_run_done.sh [options]
   --run <name>          Nextflow run name; default: last row of .nextflow/history
   --exit-code <n>       nextflow's exit status ($? of the run)
   --to <addr>           also send the same thing as an email (default: Slack only)
+  --team                also email the standard recipients (notify.py's TEAM list)
   --fs <path>           filesystem to report quota for (default: /lustre/scratch124/cellgen)
   --group <name>        quota group (default: cellgeni)
   --slack-env-file <f>  KEY=VALUE file with SLACK_BOT_TOKEN/CHANNEL_ID
@@ -48,6 +49,7 @@ while (( $# )); do
         --run)            RUN="$2"; shift 2 ;;
         --exit-code)      EXIT_CODE="$2"; shift 2 ;;
         --to)             TO="$2"; shift 2 ;;
+        --team)           TEAM=1; shift ;;
         --fs)             FS="$2"; shift 2 ;;
         --group)          GROUP="$2"; shift 2 ;;
         --slack-env-file) SLACK_ENV_FILE="$2"; shift 2 ;;
@@ -181,7 +183,11 @@ EOF
 
 if (( DRY_RUN )); then
     echo "--- Slack ---" ; cat "$SLACK_FILE"
-    [[ -n "$TO" ]] && { echo "--- email to $TO ---" ; cat "$MAIL_FILE" ; }
+    if [[ -n "$TO" || $TEAM -eq 1 ]]; then
+        recips="$TO"
+        (( TEAM )) && recips="${recips:+$recips + }notify.py's TEAM list"
+        echo "--- email to $recips ---" ; cat "$MAIL_FILE"
+    fi
     exit 0
 fi
 
@@ -189,8 +195,10 @@ fi
 # second copy of either would drift. It exits 0 when Slack is skipped, so a
 # missing token never fails the LSF job either.
 args=(--slack --slack-text-file "$SLACK_FILE" --slack-env-file "$SLACK_ENV_FILE")
-if [[ -n "$TO" ]]; then
-    args+=(--to "$TO" --subject "${BATCH}: pipeline run ${VERDICT} (${Q_FREE} free on scratch124)"
+if [[ -n "$TO" || $TEAM -eq 1 ]]; then
+    [[ -n "$TO" ]] && args+=(--to "$TO")
+    (( TEAM )) && args+=(--team)
+    args+=(--subject "${BATCH}: pipeline run ${VERDICT} (${Q_FREE} free on scratch124)"
            --body-file "$MAIL_FILE")
 fi
 "$HERE/notify.py" "${args[@]}" || echo "notify_run_done: notify.py failed — not failing the job over it" >&2

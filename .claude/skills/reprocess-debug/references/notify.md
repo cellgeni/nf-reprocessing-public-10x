@@ -1,7 +1,7 @@
-# Saving the LSF log and notifying ab76 when a batch is debugged
+# Saving the LSF log and notifying the team when a batch is debugged
 
-The last thing a debug session does, after §5 Report / §6 Issues: get the run's LSF driver log
-off scratch and onto NFS, refresh the project-wide progress counter, and tell ab76@sanger.ac.uk
+The last thing a debug session does, after §6 Report / §7 Issues: get the run's LSF driver log
+off scratch and onto NFS, refresh the project-wide progress counter, and tell the team
 what happened — by email always, by Slack when it is configured. Do this for every batch you
 finish debugging, whether or not a post-mortem was published.
 
@@ -25,9 +25,9 @@ for it, and running it does not discharge the §1-§3 closing steps.
 .claude/skills/reprocess-debug/bin/notify_run_done.sh --batch 10 --exit-code 0 --dry-run   # see it first
 ```
 
-Slack-only by default (that is the point — an email per run is noise); `--to ab76@sanger.ac.uk`
-adds the email too. It reuses `notify.py` for the credential handling and the `uvx` fallback
-below, which is why `notify.py`'s `--to` is optional.
+Slack-only by default (that is the point — an email per run is noise); `--team` (or `--to
+<addr>`) adds the email too. It reuses `notify.py` for the credential handling and the `uvx`
+fallback below, which is why `notify.py`'s `--to` is optional.
 
 Three things it is careful about, worth not undoing:
 
@@ -50,12 +50,19 @@ Three things it is careful about, worth not undoing:
 .claude/skills/reprocess-debug/bin/save_lsf_log.sh --batch 7
 ```
 
-`archive_run.sh` (§8) already copies `logs/lsf/reprocessOutput<jobid>.log` and its error twin
+`archive_run.sh` (§10) already copies `logs/lsf/reprocessOutput<jobid>.log` and its error twin
 into `/nfs/cellgeni/reprocessing-runs/batch<N>/<run>/` — but only as part of archiving the whole
 run, which happens "when you are done" with a batch and sometimes doesn't happen for a while.
 `logs/lsf/` lives on scratch, which is not backed up. `save_lsf_log.sh` does just this one copy,
-safe to run immediately and safe to re-run; archiving the run properly later just overwrites
-these two files with the same bytes.
+safe to run immediately and safe to re-run.
+
+**It does, however, make the later `archive_run.sh` refuse.** Creating
+`/nfs/cellgeni/reprocessing-runs/batch<N>/<run>/` is exactly what `archive_run.sh` checks for, so
+the full archive then stops with `error: … exists — pass --force to overwrite` (hit on batch
+12-13, 2026-09-23). Pass `--force`: at that point the directory holds nothing but the two LSF
+logs this script just wrote, and the archive rewrites them with the same bytes. Run the
+`--dry-run` first as always — it does not perform the existence check, so a clean dry-run is not
+a promise that the real run will proceed.
 
 ## §2 Refresh the progress counter
 
@@ -64,20 +71,36 @@ these two files with the same bytes.
   --json /tmp/progress.json
 ```
 
-Counts, against the master target list at
-`/nfs/cellgeni/projects/reprocessing/irods_datasets/Not_done_hs_10x.sample_table.tsv` (override
-with `--target` if a newer snapshot exists — this one is a dated, static export, not something
-that refreshes itself), how many of its ~44k samples are done: present on iRODS under
-`/archive/cellgeni/datasets/<dataset>/<sample_id>` (any pipeline's upload, not just this repo's —
-the target list is project-wide, not scoped to this repo), or completed locally in this repo's
-own `results/*/starsolo/<dataset>/<sample_id>/` but not yet uploaded.
+**The denominator is the deduplicated to-do list**, `data/tables/batches_deduplicated/` — the
+default `--target`, read as every sample in its `batch*.csv` files. It was built on 2026-10-02 by
+`scripts/make_dedup_batches.py` from `data/tables/All_10x.sample_table.tsv`: every human sample
+that was not yet on iRODS, not in local `results/`, and not in any batch already run (1-21 plus
+the old repo's `batch1.tsv`). A sample listed under several GSEs appears once, under the first.
+That is **24,864 samples in batch22-35**, and the build's `manifest.txt` in that folder records
+the exclusion counts.
 
-**Read this before trusting the number**, every time: the join is by `sample_id` string
-equality alone. The target list mixes GEO (`GSM…`), DDBJ (`DRS…`), and other archives' sample
-ids in the same column, and this repo's pipeline (`CLAUDE.md`: GEO, SRA, ENA, ArrayExpress) may
-never touch a large fraction of the non-GEO rows at all — a low or flat percentage does not mean
-this repo is behind, it can just mean most of the list is out of this pipeline's scope. Say that
-in the notification rather than letting the number read as this-repo's completion rate.
+The script counts how many of those are done: present on iRODS under
+`/archive/cellgeni/datasets/<dataset>/<sample_id>` (any pipeline's upload, not just this repo's),
+or completed locally in this repo's `results/*/starsolo/<dataset>/<sample_id>/` but not yet
+uploaded.
+
+**Read this before trusting the number**, every time:
+
+- **It is "how much of what was left is done", not a project-wide completion rate.** It
+  started at 0 / 24,864 on 2026-10-02. Rows before that date in `progress-counter.tsv` were
+  measured against the March 2026 `Not_done_hs_10x.sample_table.tsv` (44,494 samples, last at
+  18,594 done, 41.79%) and are not comparable. The script notices the change of
+  `total_target` and prints `change since last measurement: n/a — the target changed` instead
+  of a delta. Say so in the notification for the first batch after the switch.
+- **A local result counts as done whether or not it is any good.** Samples on a batch's hold
+  list (`data/tables/hold_batch<N>.tsv`) are in the done count until they are rerun or dropped.
+- The join is by `sample_id` string equality alone. A sample that has failed in this repo stays
+  in the remaining count, which is correct: it is still to do.
+
+The old project-wide number is still one flag away:
+`--target /nfs/cellgeni/projects/reprocessing/irods_datasets/Not_done_hs_10x.sample_table.tsv`.
+It mixes GEO, DDBJ and other archives' ids that this pipeline may never touch, so do not quote it
+as this repo's completion rate.
 
 **The iRODS side reads from a cache**, `/nfs/cellgeni/reprocessing-runs/.cache/irods-datasets-collections.txt`,
 refreshed automatically if it is more than 24h old (`--refresh-irods` forces it, `--no-irods`
@@ -113,7 +136,7 @@ last time" a real number rather than a guess.
 
 ```bash
 .claude/skills/reprocess-debug/bin/notify.py \
-  --to ab76@sanger.ac.uk \
+  --team \
   --subject "Batch 7 debugged — 9 permanent failures, 19.4% of target done" \
   --body-file /tmp/notify-email.txt \
   --slack --slack-text-file /tmp/notify-slack.txt \
@@ -154,14 +177,14 @@ one per line; the per-line style below is Slack's, not this one's.
   🔧 fix drafted, not applied: issues/<file>.md (if there is one)
 - ✅ <n> of <permanent total> — <dataset/accession> — <one-line cause of a correct rejection>
 
-📊 PROJECT PROGRESS  (vs <target file basename>, <total> samples)
+📊 PROGRESS ON THE DEDUPLICATED TO-DO LIST  (batches_deduplicated/, <total> samples)
 - ✅ Done:      <done_total> / <total>  (<pct>%)
     ☁️  on iRODS:                <n>
     💾  local, not yet uploaded: <n>
 - ⏳ Remaining: <remaining>
-- 📈 Change since last measurement: <+/-n, or "n/a — first measurement">
+- 📈 Change since last measurement: <+/-n, or "n/a — first measurement", or "n/a — target changed">
 
-⚠️ Caveat: <the one-liner from §2 about scope, whenever the percentage is quoted>
+⚠️ Caveat: <one line from §2: share of what was left in batch22-35, not of the whole project; held samples count as done>
 
 --
 sent by the reprocess-debug skill's notify step 🤖
@@ -186,10 +209,10 @@ reason not to reuse this for the email body.
 🐛 <n>/<total> → `<dataset>`: <one-line cause> (🔧 fix drafted, not applied)
 ✅ <n>/<total> → `<accession>`: correct rejection — <one-line reason>
 
-📊 *Progress* (vs `<target file basename>`)
+📊 *Progress* (deduplicated to-do list, batch22-35)
 ✅ Done: *<done_total> / <total>* (*<pct>%*) — ☁️ <n> on iRODS + 💾 <n> local-only
 ⏳ Remaining: <remaining>
-📈 Δ since last: <+/-n, or "n/a (first measurement)">
+📈 Δ since last: <+/-n, or "n/a (first measurement)", or "n/a (target changed)">
 ⚠️ _Caveat: <the same one-liner, in italics>_
 ```
 
@@ -202,6 +225,14 @@ that may not exist wherever this posts.
 
 **Email needs no setup** — `smtplib.SMTP("localhost")` uses the farm's local relay, same as
 `sample-tracking`'s `--email`. It will simply work.
+
+**Address the recipients with `--team`, never by typing one address.** `--team` expands to
+`notify.py`'s `TEAM` list (currently ab76 and ap41), so the set of people who get a batch
+notification lives in exactly one place. Writing `--to ab76@sanger.ac.uk` by hand is how ap41
+came to receive nothing at all for batches 6-9, reported on 2026-09-22: the relay was fine and
+every send succeeded, they were simply never a recipient. Adding someone means editing `TEAM`
+and nothing else; `--to` stays for a one-off extra address, and adds to `--team` rather than
+replacing it.
 
 **Slack needs `SLACK_BOT_TOKEN` and `CHANNEL_ID`**, read from the environment or from
 `--slack-env-file` (a plain `KEY=VALUE` file, e.g. `reprocessing_slack_bot/.env` — a *different*

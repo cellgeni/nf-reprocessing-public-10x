@@ -89,7 +89,39 @@ add "$T_FAILED" "failed${N}.log"      1
 add "$T_MANI"   "failures${N}.tsv"    0
 add "$T_JOBS"   "failedjobs${N}.tsv"  0
 add "$T_LOGS"   "runlogs${N}.tsv"     1
-add "data/tables/batches/batch${N}.csv" "batch${N}.csv" 0
+# batch22 onward were built into batches_deduplicated/; the never-run
+# data/tables/batches/batch22-49 share their names, so the deduplicated one wins.
+BATCH_TABLE="data/tables/batches_deduplicated/batch${N}.csv"
+[[ -f "$BATCH_TABLE" ]] || BATCH_TABLE="data/tables/batches/batch${N}.csv"
+add "$BATCH_TABLE" "batch${N}.csv" 0
+
+# The output side of the run, and the only record of whether what succeeded was any
+# good. results/<outdir>/ is deleted after upload, so unarchived it is simply lost:
+# batch 9 published 38 near-empty matrices with no task failing, and for batches 1-8
+# that evidence no longer exists anywhere. Both files are small (140KB and 377KB for
+# batch 9). See SKILL.md §4 and verify.md §qc.
+OUTDIR="results/batch${N}"
+add "${OUTDIR}/mapping_qc_stats.tsv" "mapping_qc_stats.tsv" 1
+
+# The run's own attribution table, concatenated. searchlist.tsv is per-batch and is
+# overwritten by the next run, so without this a re-triage years later cannot name a
+# single dataset — which is already true of batch 8 (see classify.md §attribution).
+# Built here the same way triage<N>.json is, below.
+LINKS_SRC="data/tables/links${N}.tsv"
+if [[ ! -s "$LINKS_SRC" && $DRY -eq 0 ]] && compgen -G "${OUTDIR}/metadata/*/links.tsv" >/dev/null; then
+    echo "==> concatenating ${OUTDIR}/metadata/*/links.tsv -> $LINKS_SRC" >&2
+    cat "${OUTDIR}"/metadata/*/links.tsv > "$LINKS_SRC" \
+        || warn "could not build $LINKS_SRC; archiving without it"
+fi
+if [[ -s "$LINKS_SRC" ]]; then
+    add "$LINKS_SRC" "links${N}.tsv" 1
+elif (( DRY )) && compgen -G "${OUTDIR}/metadata/*/links.tsv" >/dev/null; then
+    # Not built under --dry-run (same as triage<N>.json), so it cannot go in the
+    # plan — say so rather than letting the preview imply it will be skipped.
+    echo "note: a real run would concatenate $(compgen -G "${OUTDIR}/metadata/*/links.tsv" | wc -l)" \
+         "links.tsv into $LINKS_SRC and archive it as links${N}.tsv" >&2
+fi
+
 if [[ -n "$STAMP" ]]; then
     for kind in report timeline; do
         add "reports/execution_${kind}_${STAMP}.html" "execution_${kind}_${STAMP}.html" 1
@@ -115,7 +147,7 @@ PM_INDEX="$REPO/docs/post-mortems.md"
 PM_URL=""
 if [[ -f "$PM_INDEX" ]]; then
     PM_URL="$(grep -F "$RUN" "$PM_INDEX" 2>/dev/null \
-        | grep -o 'https://claude\.ai/code/artifact/[0-9a-f-]\{36\}' | head -1 || true)"
+        | grep -oE 'https://claude\.ai/(code/artifact/[0-9a-f-]{36}|artifact/[A-Za-z0-9]+)' | head -1 || true)"
 fi
 
 # triage json: generate next to the manifest if it is not there already
