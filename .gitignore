@@ -53,3 +53,4 @@ modules/.nf-test
 .claude/*
 !.claude/skills/
 __pycache__
+issues
