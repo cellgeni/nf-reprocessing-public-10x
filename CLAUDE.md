@@ -17,7 +17,8 @@ any non-trivial change:
 - [.claude/skills/reprocess-debug/](.claude/skills/reprocess-debug/) — the `reprocess-debug`
   skill: collecting a finished run's logs (`bin/collect_run_logs.sh`), classifying and
   attributing failures (`bin/triage.py`), exit-code meanings per process, how to verify claims
-  against the `nf-work` dirs where they survive (batches 1-5 were deleted 2026-09-14),
+  against the `nf-work` dirs where they survive (batches 1-5 were deleted 2026-09-14, and
+  batches 6-19 by 2026-10-02 — only the newest runs keep theirs),
   known-good regression accessions, and open issues found
   but not fixed. Also `references/run-index.md` — every run's name, session, archive path and
   failure counts, so none of that has to be hunted for. Supersedes the old `docs/agent_debug.md`,
@@ -73,7 +74,7 @@ Tags available: `geo`, `arrayexpress`, `bioproject`, `enafq`, `orifq`, `bam`, `s
 
 Iterating on chemistry inference is much faster by calling the Python directly against a
 persisted work dir than by running the pipeline — see §9 of `docs/agent_debug.md`. The work
-dirs only survive from batch 6 onward.
+dirs only survive for the most recent runs: as of 2026-10-02, batches 20-21 and nothing older.
 
 ## Architecture
 
