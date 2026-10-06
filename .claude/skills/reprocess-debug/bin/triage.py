@@ -163,11 +163,13 @@ def load_attribution(repo, searchlist, datasets, source=None):
     if N:
         own_lists = sorted(glob.glob(
             os.path.join(repo, f"results/batch{N}/metadata/*/links.tsv")))
-        # batch22 onward come from the deduplicated list. The old, never-run
-        # data/tables/batches/batch22-49 share those names, so take only the
-        # first that exists, never both.
+        # batch22 onward come from the deduplicated list, and batch24 onward from
+        # its biggest-first re-pack. The superseded dedup batch24-35 and the old,
+        # never-run data/tables/batches/batch22-49 share those names, so take only
+        # the first that exists, never more.
         own_datasets = [p for p in (os.path.join(repo, f"data/tables/{d}/batch{N}.csv")
-                                    for d in ("batches_deduplicated", "batches"))
+                                    for d in ("batches_deduplicated_sorted", "batches_deduplicated",
+                                              "batches"))
                         if os.path.exists(p)][:1]
 
     cands = [searchlist] if searchlist else own_lists + [

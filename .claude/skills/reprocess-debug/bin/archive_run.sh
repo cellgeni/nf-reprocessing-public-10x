@@ -89,9 +89,11 @@ add "$T_FAILED" "failed${N}.log"      1
 add "$T_MANI"   "failures${N}.tsv"    0
 add "$T_JOBS"   "failedjobs${N}.tsv"  0
 add "$T_LOGS"   "runlogs${N}.tsv"     1
-# batch22 onward were built into batches_deduplicated/; the never-run
-# data/tables/batches/batch22-49 share their names, so the deduplicated one wins.
-BATCH_TABLE="data/tables/batches_deduplicated/batch${N}.csv"
+# batch22 onward were built into batches_deduplicated/, and batch24 onward re-packed
+# biggest-first into batches_deduplicated_sorted/ (scripts/sort_batches_by_size.py).
+# All three dirs share names, so the first that exists wins.
+BATCH_TABLE="data/tables/batches_deduplicated_sorted/batch${N}.csv"
+[[ -f "$BATCH_TABLE" ]] || BATCH_TABLE="data/tables/batches_deduplicated/batch${N}.csv"
 [[ -f "$BATCH_TABLE" ]] || BATCH_TABLE="data/tables/batches/batch${N}.csv"
 add "$BATCH_TABLE" "batch${N}.csv" 0
 

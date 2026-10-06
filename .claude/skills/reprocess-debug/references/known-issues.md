@@ -48,6 +48,7 @@ failures are a different population, so do not expect the August shape.
 | 19 | `focused_goldberg` | 24 | **16** | 8 self-healed (4 × truncated gzip, 2 argparse errors on mate-less runs, 1 × `lsf-memlimit`, 1 `SRA2FASTQ` at 140). 12 of the 16 are the **same** GSE241739 index-only runs, reached as GSE242039, and 1 is the **same** `GSM7744878` Velocyto segfault, reached as GSE241882. **New: 3 samples lost because ENA's two-file FASTQ omitted the 28 bp barcode read that SRA holds** (GSE241998/GSE241999, `§open`). A retrospective scan found batch 14's GSE228428 (5 samples) was the same defect, misfiled as a submitter one. 67 of 767 aligned (8.7%) not GEX, 22 of them V(D)J. **213 of 980 alignments (21.7%, 1,190 CPU-h) duplicates**, plus 16 samples aligned in both batches. 4 of 771 samples lost. |
 | 20 | `sleepy_curie` | 104 | **94** | Ran concurrently with batch 21. 10 self-healed (6 × `lsf-memlimit`, 4 × truncated gzip). **52 of the 94 are the strand-test segfault** in one snRNA-seq dataset (GSE245310), at margins of 9-23 points, so the drafted margin fix would not have saved them. The test reads GeneFull; exonic Gene said Forward in all 52 (`§open`). 24 are a four-way split-run deposit (GSE245998, 6 samples) caught at `SRA2FASTQ` and verdicted correct-rejection by `triage.py`, wrongly. 18 are a correct rejection (GSE245175, SORT-seq). 64 of 577 aligned (11.1%) not GEX, 51 of them V(D)J. 131 of 708 alignments (18.5%, 1,997 CPU-h) duplicates. 67 of 644 samples lost. |
 | 21 | `sick_galileo` | 30 | **27** | A short failure list and the batch's biggest loss outside it: **`FETCH10XMETA` dropped 159 of 873 samples at exit 0** (GSE246613 147, GSE247111 12, shared BioSample) and published 112 pooled matrices, most under the TCR/CellPlex GSM's name. 3 self-healed (truncated gzip). The 27: 18 split-mate (GSE247205, 9 samples), 8 truncated-UMI `len=27` (GSE247827, whole dataset; `10,11` dry-run accepts it), 1 0-spot SRA run. 123 of 701 aligned (17.5%) not GEX, 108 of them V(D)J (GSE247531 alone 89). 114 of 815 alignments (14.0%, 1,245 CPU-h) duplicates; 24 samples also aligned in batch 20 (GSE245187 = GSE246960). 172 samples lost, all recoverable. Work dirs for batches 6-19 found deleted this session. |
+| 22 | `gloomy_church` | 73 | **29** | **The first batch from `batches_deduplicated/`, and 0 duplicate alignments** (1,838 QC rows = 1,838 samples). 44 self-healed: **35 × STARsolo `lsf-memlimit`** at 128 GB, every one a sample of ≥ 1.35 × 10⁹ reads, 2,686 core-h (7.6% of the stage), plus 9 truncated gzip. Of the 29, 19 are harmless (18 index-only runs in GSE248788/GSE249894/GSE250444, one 2,686-spot run), which `triage.py` leaves as "investigate". **New: SRA runs whose read layout changes partway through** (lanes with 3 vs 2 reads per spot, or R1/R2 loaded as consecutive single-end spots) fail `SRA2FASTQ`'s mate-count guard with the data complete — 3 samples (GSE249159 ×2, GSE248489 ×1, `§open`). **New: ENA FASTQs corrupt at source** — 4 files of 2 GSE249894 runs fail `pigz -t` while matching ENA's own `fastq_md5` (`§open`). The shared-BioSample drop recurred (GSE254170, 1 lost, 1 pooled). A mate-less run cost data for the first time (`GSM7996301`, 7.7% of reads), because deduplicated input no longer supplies a rescuing duplicate. **190 of 1,838 aligned (10.3%) not GEX**, 116 V(D)J; the title scan flagged 44 healthy GEX (GSE249313, `scRNA-seq and TCR profiling …`) and missed 20. 4 of 1,842 samples lost, 3 published partial, all recoverable. |
 
 Batch 6 is the useful worked example: `.nextflow/history` records it `OK`, and it still had 7
 permanent failures. `errorStrategy 'ignore'` means a green run tells you nothing.
@@ -197,7 +198,9 @@ it is a reason to run §4.
   GSE246613 emitted 104 of 251 and GSE247111 10 of 22, so **159 samples (18.2% of the batch)
   were lost at exit 0**. 112 published matrices pool a GEX library into a TCR- or
   CellPlex-named GSM. The SRX lookup in the (still unapplied) diff resolves 273/273 to one run
-  each. Running total: 185 lost, 124 pooled.
+  each. **Batch 22 again** (GSE254170): `GSM8427071` (uninduced control) dropped, its run
+  pooled into `GSM8427072` (dox-induced knockdown), both on BioSample `SAMN42510873` with their
+  own SRX. Running total: 186 lost, 125 pooled. GitHub #6.
 * **STARsolo discards a finished Gene matrix when Velocyto segfaults.** `platform_10x.sh`
   hard-codes `--soloFeatures Gene GeneFull Velocyto`. On `GSM7744878` (8.06 × 10⁹ reads, 12
   runs, GSE241683/GSE241882) STAR writes `Gene` and `GeneFull` (106,104 cells, 3,876 median
@@ -221,8 +224,33 @@ it is a reason to run §4.
   `This run-level script expects 2-4 FASTQ files`. In batches 18-19 all three cases
   (`SRR25734143`, `SRR26167346`, `SRR26167354`) were covered by the dataset's duplicate row
   downloading the same file successfully, so nothing was lost. In a non-duplicated dataset the
-  run would be dropped and the sample published from partial input. No issue drafted; it has
-  not yet cost a sample.
+  run would be dropped and the sample published from partial input. **Batch 22 is that case**,
+  and with deduplicated input from batch 22 on, no duplicate row will rescue it again:
+  `SRR27373658_2` hit a 16-minute ENA outage (an 802-byte Apache directory listing served for
+  the file URL on all 5 attempts, 2026-10-03 11:36-11:52; a valid 3.34 GB gzip the next day),
+  `_1` went on alone, and `GSM7996301` was published from 7 of 8 runs, 7.7% of its reads
+  missing. GitHub #16.
+* **ENA can serve FASTQs that are corrupt at source.** Batch 22, GSE249894: all four files of
+  `SRR27178495` and `SRR27178635` fail `pigz -t` (`incomplete deflate data`) on every clean
+  download, and each matches ENA's published `fastq_bytes` **and `fastq_md5`** — ENA checksummed
+  the truncated files, so MD5 verification (#23) would pass them. `WGET10X` refuses them
+  correctly, but the route is fixed as `ENAFQ` in `parse_metadata.sh` and nothing falls back to
+  SRA, so the runs are dropped and the samples published partial (`GSM7966587` 6.7%,
+  `GSM7966594` 1.8% of reads). **Detection signature**: a `WGET10X` integrity failure on a
+  download whose size equals ENA's `fastq_bytes`. Drafted in
+  `issues/2026-10-04-batch22-ena-fastq-corrupt-at-source.md`; the fallback it proposes would fix
+  #9 too.
+* **SRA runs whose read layout changes partway through are refused, with the data complete.**
+  `SRA2FASTQ` dumps `--split-files`, which assigns a spot's *n*th read to `_n` regardless of
+  role. Batch 22: `SRR27016858`/`SRR27016862` (GSE249159) mix lanes of 3 reads per spot
+  (8 + 28 + 91) with lanes of 2 (28 + 91), so `_3` holds about half the spot count and the
+  mate-count guard fires; `SRR26923939` (GSE248489) holds R1 and R2 as consecutive single-end
+  spots with shared read names and dumps one file. 3 samples lost, all recoverable by splitting
+  on read length and pairing on read name. **Detection signature**: `sra.tsv`'s mean spot length
+  is not a sum of plausible read lengths (123 = midway between 127 and 119; 58 for 28 + 90 as
+  separate spots). Batch 16's `SRR24937677` `partial-mate` may be the same shape. Also: these
+  runs retry to 5 on `SRA2FASTQ`'s own `errorStrategy`, 20 deterministic attempts and 59 core-h.
+  Drafted in `issues/2026-10-04-batch22-sra-mixed-spot-layout.md`.
 * **Nothing gates a sample on whether it mapped.** Batch 9 published 38 near-empty matrices —
   HTO/hashing, ADT/CSP, CRISPR-enrichment and "custom" feature libraries aligned as GEX. Every
   task completed, so none of it is in `failures9.tsv`; the pathology is only visible in

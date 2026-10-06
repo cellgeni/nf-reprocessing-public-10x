@@ -176,8 +176,10 @@ awk -F'\t' 'NR>1 && !seen[$2]++ && $17+0 < 0.05 && $8+0 < 100 {print $1, $2, $14
 python3 - <<'EOF'
 import csv, os
 B = "10"
-# batch22+ live in batches_deduplicated/; the never-run batches/batch22-49 share the names
-bt = next(p for p in (f"data/tables/batches_deduplicated/batch{B}.csv",
+# batch24+ live in batches_deduplicated_sorted/, batch22-23 in batches_deduplicated/;
+# the superseded dedup batch24-35 and never-run batches/batch22-49 share the names
+bt = next(p for p in (f"data/tables/batches_deduplicated_sorted/batch{B}.csv",
+                      f"data/tables/batches_deduplicated/batch{B}.csv",
                       f"data/tables/batches/batch{B}.csv") if os.path.exists(p))
 for r in csv.DictReader(open(bt), delimiter="\t"):
     ds  = r["dataset_id"]
@@ -291,6 +293,16 @@ that means it went out.
 (batch22-35, 24,864 samples), not the March 2026 project-wide target. It started at 0% and
 counts how much of what was left is done. It is not comparable with rows before 2026-10-02,
 which were measured against 44,494 samples.
+
+**Batch24 onward run from `data/tables/batches_deduplicated_sorted/` (batch24-32, the
+last).** On 2026-10-06 `scripts/sort_batches_by_size.py --reads-only-from 28` re-packed the
+never-run dedup batch24-35 so that the datasets with the most reads per sample go first.
+Batches 24-27 close at 1842 samples or 1 T reads, whichever comes first. Batches 28-32
+carry about 930 G reads each with no sample cap, so they grow from 1745 to 7506 samples.
+The sample set is identical, so the progress denominator above is unchanged. The dedup
+`batch24-35.csv` stay on disk but are superseded; never read a batch-24+ table from there,
+and there is no batch33 or later to run. `dataset_sizes.tsv` beside the batches ranks every
+dataset by size, and `run_reads.tsv` records each run's read count and where it came from.
 
 ## 9. Files
 
