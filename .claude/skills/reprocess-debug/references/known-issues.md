@@ -49,6 +49,7 @@ failures are a different population, so do not expect the August shape.
 | 20 | `sleepy_curie` | 104 | **94** | Ran concurrently with batch 21. 10 self-healed (6 × `lsf-memlimit`, 4 × truncated gzip). **52 of the 94 are the strand-test segfault** in one snRNA-seq dataset (GSE245310), at margins of 9-23 points, so the drafted margin fix would not have saved them. The test reads GeneFull; exonic Gene said Forward in all 52 (`§open`). 24 are a four-way split-run deposit (GSE245998, 6 samples) caught at `SRA2FASTQ` and verdicted correct-rejection by `triage.py`, wrongly. 18 are a correct rejection (GSE245175, SORT-seq). 64 of 577 aligned (11.1%) not GEX, 51 of them V(D)J. 131 of 708 alignments (18.5%, 1,997 CPU-h) duplicates. 67 of 644 samples lost. |
 | 21 | `sick_galileo` | 30 | **27** | A short failure list and the batch's biggest loss outside it: **`FETCH10XMETA` dropped 159 of 873 samples at exit 0** (GSE246613 147, GSE247111 12, shared BioSample) and published 112 pooled matrices, most under the TCR/CellPlex GSM's name. 3 self-healed (truncated gzip). The 27: 18 split-mate (GSE247205, 9 samples), 8 truncated-UMI `len=27` (GSE247827, whole dataset; `10,11` dry-run accepts it), 1 0-spot SRA run. 123 of 701 aligned (17.5%) not GEX, 108 of them V(D)J (GSE247531 alone 89). 114 of 815 alignments (14.0%, 1,245 CPU-h) duplicates; 24 samples also aligned in batch 20 (GSE245187 = GSE246960). 172 samples lost, all recoverable. Work dirs for batches 6-19 found deleted this session. |
 | 22 | `gloomy_church` | 73 | **29** | **The first batch from `batches_deduplicated/`, and 0 duplicate alignments** (1,838 QC rows = 1,838 samples). 44 self-healed: **35 × STARsolo `lsf-memlimit`** at 128 GB, every one a sample of ≥ 1.35 × 10⁹ reads, 2,686 core-h (7.6% of the stage), plus 9 truncated gzip. Of the 29, 19 are harmless (18 index-only runs in GSE248788/GSE249894/GSE250444, one 2,686-spot run), which `triage.py` leaves as "investigate". **New: SRA runs whose read layout changes partway through** (lanes with 3 vs 2 reads per spot, or R1/R2 loaded as consecutive single-end spots) fail `SRA2FASTQ`'s mate-count guard with the data complete — 3 samples (GSE249159 ×2, GSE248489 ×1, `§open`). **New: ENA FASTQs corrupt at source** — 4 files of 2 GSE249894 runs fail `pigz -t` while matching ENA's own `fastq_md5` (`§open`). The shared-BioSample drop recurred (GSE254170, 1 lost, 1 pooled). A mate-less run cost data for the first time (`GSM7996301`, 7.7% of reads), because deduplicated input no longer supplies a rescuing duplicate. **190 of 1,838 aligned (10.3%) not GEX**, 116 V(D)J; the title scan flagged 44 healthy GEX (GSE249313, `scRNA-seq and TCR profiling …`) and missed 20. 4 of 1,842 samples lost, 3 published partial, all recoverable. |
+| 23 | `exotic_dijkstra` | 69 | **46** | **The largest loss since batch 21, and from a new cause: a 10-minute GEO refusal.** From 20:25 to 20:35 on 2026-10-04 GEO (through the Sanger proxy) answered 403 to `_family.soft.gz` requests; `collect_metadata.sh` only retries 503 and Nextflow resubmits at once, so **31 series used all 5 `FETCH10XMETA` attempts inside the window: 180 of 1,750 samples (10.3%) lost**, every URL fine on 2026-10-07 (`§open`). The shared-BioSample drop recurred for the sixth batch (GSE254250: 8 lost, 6 `_VDJ` GSMs published holding their donor's GEX runs). Two Lustre incidents on 2026-10-05 (04:44, 21:21-21:26) failed 14 attempts; 12 healed, `GSM8155160` did not (its one exit-1 retry started 15 s later, inside the event), and `SRR28374829`'s `SRA2FASTQ` **hung for 24 h on 16 cores** after a `pigz` I/O error until killed (`TERM_OWNER`), holding the end of the run ~9 h — `SRA2FASTQ` has no `time` (`§open`). 2 lost to the strand-test segfault (GSE259378), 3 to SRA runs with a block of spots missing a read (GSE256490 ×2, GSE262151). 9 harmless/correct (4 index-only, 3 `_oligo`, 2 MiSeq Ig amplicons). **New pathology:** GSE261353 deposited a placeholder cDNA read (8-20 distinct sequences per run) for 6 samples, published with no matrix. **167 of 1,551 aligned (10.8%) not GEX**, 100 V(D)J; the title scan had 8 false positives (`… sgRNA pool N`) and missed 34. 0 duplicate alignments; 1 STARsolo memory kill (35 in batch 22). 194 of 1,750 samples lost, all recoverable; 0 partial. Hold list `data/tables/hold_batch23.tsv` (182 hold, 31 review); rerun list `data/tables/rerun_batch23.csv`. |
 
 Batch 6 is the useful worked example: `.nextflow/history` records it `OK`, and it still had 7
 permanent failures. `errorStrategy 'ignore'` means a green run tells you nothing.
@@ -89,6 +90,9 @@ it is a reason to run §4.
   was wrong. The driver log shows all six got `--wl gex_3pv3_family`. The values are what
   `starsolo qc` prints from its plate-based branch when `output/Gene/filtered/` is missing:
   `Undef` is hard-coded and 6,794,880 is the raw v3 barcode list, not a cell count.
+  **Batch 23 added six with an archive cause** (GSE261353, `GSM8141305`-`310`): the deposited
+  cDNA read is a placeholder, 8-20 distinct 59 bp + 32 `N` sequences repeated millions of times
+  per run, so STAR maps 0% ("too short"). See `docs/archive-pathologies.md`.
 
 * **Chemistry inference has no upper bound on the barcode read length.**
   `gex_observed_umi_len()` in `infer_10x_run_recommended.py` accepts any read where
@@ -200,7 +204,10 @@ it is a reason to run §4.
   CellPlex-named GSM. The SRX lookup in the (still unapplied) diff resolves 273/273 to one run
   each. **Batch 22 again** (GSE254170): `GSM8427071` (uninduced control) dropped, its run
   pooled into `GSM8427072` (dox-induced knockdown), both on BioSample `SAMN42510873` with their
-  own SRX. Running total: 186 lost, 125 pooled. GitHub #6.
+  own SRX. **Batch 23 again** (GSE254250, the sixth batch): per donor a `_GEX`, `_VDJ` and
+  sometimes `_HASH` GSM on one BioSample; 7 of 15 emitted, and each surviving `_VDJ` GSM was given
+  its donor's GEX (and HASH) runs, publishing 6 GEX matrices under VDJ names (0.5-0.7% TR/IG).
+  Running total: 194 lost, 131 pooled. GitHub #6.
 * **STARsolo discards a finished Gene matrix when Velocyto segfaults.** `platform_10x.sh`
   hard-codes `--soloFeatures Gene GeneFull Velocyto`. On `GSM7744878` (8.06 × 10⁹ reads, 12
   runs, GSE241683/GSE241882) STAR writes `Gene` and `GeneFull` (106,104 cells, 3,876 median
@@ -250,7 +257,12 @@ it is a reason to run §4.
   is not a sum of plausible read lengths (123 = midway between 127 and 119; 58 for 28 + 90 as
   separate spots). Batch 16's `SRR24937677` `partial-mate` may be the same shape. Also: these
   runs retry to 5 on `SRA2FASTQ`'s own `errorStrategy`, 20 deterministic attempts and 59 core-h.
-  Drafted in `issues/2026-10-04-batch22-sra-mixed-spot-layout.md`.
+  Drafted in `issues/2026-10-04-batch22-sra-mixed-spot-layout.md`. **Batch 23 added a related
+  shape, 3 samples:** a block of spots missing one read (`SRR17720155`: 11.6 M spots at the end
+  of lane 3 with no barcode read; `SRR17720215`: 13.4 M with no cDNA read; `SRR28411009`: 0.22%
+  of spots with 1 or 3 of 4 reads). Splitting by length is not enough there; spots without both
+  a barcode and a cDNA read have to be dropped after pairing by name. Evidence added to the same
+  draft.
 * **Nothing gates a sample on whether it mapped.** Batch 9 published 38 near-empty matrices —
   HTO/hashing, ADT/CSP, CRISPR-enrichment and "custom" feature libraries aligned as GEX. Every
   task completed, so none of it is in `failures9.tsv`; the pathology is only visible in
@@ -287,7 +299,30 @@ it is a reason to run §4.
   27 of the 52 at `%rev` ≥ 50. The test reads `GeneFull`, which on single-nucleus data is mostly
   intronic. The test alignments' own exonic `Gene` rows say Forward by 2.6-4.1× in all 52.
   `--wl gex_3pv3_family` had already fixed the chemistry as 3'-only. Skipping the test for a
-  3'-only `--wl` saves every case seen. 68 samples across batches 9, 14, 15 and 20.
+  3'-only `--wl` saves every case seen. 68 samples across batches 9, 14, 15 and 20, **70 with
+  batch 23** (GSE259378 ×2: `gex_3pv3_family`, 150 bp R1, Reverse by 6 and 2 points; the
+  other 26 samples of the series aligned `Single`/`Forward`).
+* **`FETCH10XMETA` gives up on a GEO 403 at once, and its retries are immediate.**
+  `collect_metadata.sh` fetches `_family.soft.gz` with `wget --retry-on-http-error=503`; a 403 is
+  final, the task exits in about a second, and Nextflow resubmits at once. Batch 23: GEO, through
+  `wwwcache.sanger.ac.uk:3128`, answered 403 from 20:25:08 to 20:34:58 on 2026-10-04, and **31 of
+  179 series used all 5 attempts inside that window (3.8-9.1 min each): 180 samples lost**, the
+  largest cause in the batch. 10 more series got through on attempts 2-5. All 175 failed attempts
+  carry the same `403 Forbidden`; the URLs return 206 on 2026-10-07. Rate is not the obvious
+  trigger: batch 22 ran at 7 concurrent with no 403, batch 23 at 5. `WGET10X` learnt the same
+  lesson for ENA (`configs/wget10x.config`). Drafted, with a tested diff (403/429/5xx retried,
+  ~15 min of in-job backoff, 404 still fails fast), in
+  `issues/2026-10-07-batch23-geo-soft-403-no-backoff.md`. `triage.py` now calls these
+  `meta-soft-download` and attributes series-tagged tasks to the series.
+* **`SRA2FASTQ` has no `time` limit, so a dump wedged on a Lustre error is held, not retried.**
+  Batch 23: `SRR28374829`'s `pigz` hit `Input/output error` at 21:25 on 2026-10-05 during a
+  Lustre client eviction; the task then sat 24 h on 16 cores (8,524 CPU-s in 88,006 s) until
+  killed (`TERM_OWNER`), ~390 core-h, and held the end of the run ~9 h, including GSE260842's
+  four samples whose `groupTuple` could only close with the channel. The slowest of 6,924
+  completed dumps in batches 20-23 took 2.44 h. Drafted, with a diff (`time = { 8.h *
+  task.attempt }`), in `issues/2026-10-07-batch23-sra2fastq-no-time-limit.md`. The same events
+  failed 13 other attempts; `triage.py` now calls them `lustre-io-error` /
+  `star-input-unreadable` (the `R1 length (-2147483647)` symptom, also batch 6's transient).
 * **`umi_len` is held to exact equality across a sample's runs, and it is an observed quantity.**
   A run sequenced with a longer R1 reports 12 observed UMI bases where its siblings report 10, and
   `require_metadata_compatibility` rejects the sample. Batch 9 lost GSM6634355 and GSM6634358

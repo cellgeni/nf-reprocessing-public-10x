@@ -54,9 +54,16 @@ Five rules override everything below.
    2026-10-02 (0 of 952 failed-task dirs left)**, so walk-back works only on runs still on
    scratch; for the rest the archive under `/nfs/cellgeni/reprocessing-runs/` is the whole of the
    surviving evidence. Check the dir exists before promising to verify anything.
-4. **Mind the sizes.** The Bash tool timeout is 120 s; `data/tables/failed2.log` is 793 MB;
-   `.nextflow.log` is 35 MB; `find` across `nf-work/` or `/` does not return. Long collections
-   go in the background and get polled. Details in `data-map.md §sizes`.
+4. **Mind the sizes, and run anything heavy on LSF, not on the head node.** The Bash tool
+   timeout is 120 s; `data/tables/failed2.log` is 793 MB; `.nextflow.log` is 35 MB; `find`
+   across `nf-work/` or `/` does not return. The head nodes are for editing, LSF and light
+   reads, and Arbiter enforces it: on 2026-10-07 the batch-23 session's full-file FASTQ scans,
+   `gzip -t` and a python pass over 218 matrices averaged ~3.5 cores on `farm22-head2` and put
+   ab76 in `penalty1`. **Running it in the background does not move it off the head node.**
+   Anything that reads a FASTQ past its head, decompresses or checksums a whole file, loops over
+   many work dirs or matrices, or would take more than about a CPU-minute goes through
+   `bin/farm_run.sh` (a `bsub -K` wrapper), itself launched with `run_in_background: true`.
+   The line between light and heavy is in `data-map.md §sizes`.
 5. **A task that completed is not an output that is good, and a sample that never ran leaves no
    trace at all.** Batch 9 published 38 near-empty matrices, batch 10 published 75 and batch 11
    published 144 — 4.8%, 10.0% and **17.1%** of everything they aligned — non-GEX libraries
@@ -112,8 +119,17 @@ Resolves batch → run name via `.nextflow/history`, exports the 36-field trace,
 last failed attempt per task, and writes four files into `data/tables/`:
 `runlogs<N>.tsv`, `failedjobs<N>.tsv`, `failed<N>.log`, `failures<N>.tsv`.
 
-**Run it in the background** — `nohup … &` or `run_in_background: true`. It reads a work dir per
-failed task, and a 1800-failure run will not finish inside the tool timeout.
+**Run it on LSF, in the background.** It runs `nextflow log` (a JVM) over the whole trace and
+reads a work dir per failed task, and a 1800-failure run will not finish inside the tool
+timeout. Submit it through the wrapper, with `run_in_background: true`:
+
+```bash
+.claude/skills/reprocess-debug/bin/farm_run.sh --name collect23 --mem 8G -- \
+  .claude/skills/reprocess-debug/bin/collect_run_logs.sh --batch 23
+```
+
+`triage.py`, the §4 screens over `mapping_qc_stats.tsv` and `links.tsv`, and reading a handful of
+work dirs are light and fine on the head node.
 
 Three things it does that hand-collection got wrong, and that you should not undo:
 
@@ -220,7 +236,9 @@ done | grep -Ei '(^|[[:space:]_-])(TCR|BCR|VDJ|CITE|HTO|ADT|CSP|CMO|hashtag|hash
 
 Confirm a hit before calling it: the matrix itself is decisive. A V(D)J library's top genes are
 `TRBV`/`TRAV` (or `IGHV`) segments — count UMIs per gene in
-`starsolo/<GSE>/<GSM>/output/Gene/filtered` rather than arguing from the title alone.
+`starsolo/<GSE>/<GSM>/output/Gene/filtered` rather than arguing from the title alone. One or
+two matrices are fine on the head node; a whole hold list's worth (batch 23 checked 218) is a
+`bin/farm_run.sh` job, with the helper script on Lustre (`logs/lsf/debug/`), not in `/tmp`.
 
 `Med_nFeature < 100` on its own catches 131 of batch 11's 144 with one false positive, but it is
 **not** a safe replacement for the conjunction: on batch 10 it adds 28 samples of which at least
@@ -308,6 +326,7 @@ dataset by size, and `run_reads.tsv` records each run's read count and where it 
 
 | Path | What |
 |---|---|
+| `bin/farm_run.sh` | run one heavy measurement on LSF (`bsub -K`) instead of the head node; prints its output, returns its exit status. See `data-map.md §headnode` |
 | `bin/collect_run_logs.sh` | run/batch → `runlogs`, `failedjobs`, `failed.log`, `failures` manifest |
 | `bin/triage.py` | manifest → classified, attributed, verdicts, `--json <path>` |
 | `bin/archive_run.sh` | a finished run → a complete record under `/nfs/cellgeni/reprocessing-runs/` |

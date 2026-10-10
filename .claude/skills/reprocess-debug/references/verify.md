@@ -21,6 +21,11 @@ conclusions were wrong until checked. Where they do not, say that a claim rests 
 logs alone — batch 4 was collected after its work dirs went and all 47 of its failures carry
 `(no .command.log found)`, so its counts are known and its reasons are not.
 
+**Measure on LSF, not on the head node.** Reading a log, a JSON or the head of a FASTQ in a work
+dir is fine where you are. Anything that reads a whole dumped FASTQ, tests a gzip, or loops over
+many files goes through `bin/farm_run.sh`, launched with `run_in_background: true` — see
+`data-map.md §headnode`, and the Arbiter penalty that taught it (2026-10-07).
+
 ## §walkback — from a failed tag to the data
 
 ```bash
@@ -36,6 +41,30 @@ for f in "$WD"/fastqs/*; do dirname "$(realpath "$f")"; done | sort -u
 message.** `fastq-dump` dropping a mate appeared as an argparse usage error in `RENAME10XRUN`.
 Truncated downloads appeared as gzip CRC errors. When a message looks like a tooling mistake
 rather than a data problem, walk back up the staged symlinks before believing it.
+
+### §fastq — measuring a dumped run, on LSF
+
+The batch-23 measurements, as they should have been run. `SRA2FASTQ` leaves uncompressed
+`_N.fastq` files of 20-110 GB in its work dir, so each of these is minutes of CPU and a job of
+its own; submit them side by side.
+
+```bash
+W=.claude/skills/reprocess-debug/bin/farm_run.sh
+# read-length runs: where in the file the length changes (a mixed or missing-read layout)
+$W --name rle-$RUN -- "awk 'NR%4==1{h=\$1} NR%4==2{l=length(\$0); if(l!=p){print int(NR/4)+1, h, l; p=l}}' $WD/${RUN}_2.fastq"
+# records per lane, from the Illumina read name
+$W --name lanes-$RUN -- "awk 'NR%4==1{split(\$1,a,\":\"); c[a[4]]++} END{for(l in c) print l, c[l]}' $WD/${RUN}_3.fastq"
+# how many distinct cDNA reads — capped, so a normal library exits at once instead of
+# hashing 70 M reads (GSE261353's placeholder reads had 8-20)
+$W --name distinct-$GSM -- "zcat $R2 | awk 'NR%4==2 && !(\$0 in c){c[\$0]; if(++k>1000){print \">1000 after\", NR/4; exit}} END{if(k<=1000) print k, \"distinct in\", NR/4}'"
+# integrity of every staged FASTQ of a sample
+$W --name gzt-$GSM -- "for f in $WD/fastqs/*/*.gz; do gzip -t \"\$f\" && echo \"\$f OK\"; done"
+```
+
+Compare record counts with `sra.tsv`'s spot count (`$4`) and mean spot length (`$7`): a mean
+that is not a sum of the read lengths seen is the signature of spots with a read missing or a
+layout change (`known-issues.md §open`). Work dirs disappear when `nf-work` is cleaned —
+batch 23's went within hours of the debug session — so measure first and archive the numbers.
 
 ## §whitelist — measuring the barcode match rate
 
@@ -72,7 +101,9 @@ def probe(path, wl="737K-august-2016.txt", cb=16, start=0, n=100_000):
                 match=100*hit/usable if usable else 0)
 ```
 
-Compare `start=0` against `start=1_000_000`. A large gap means a sampling artifact, not bad
+Compare `start=0` against `start=1_000_000` — the second decompresses 1.1 M records per call, so
+put the function in a file and run it through `bin/farm_run.sh` for anything past one quick
+head probe. A large gap means a sampling artifact, not bad
 data. A flat low rate in both, with low `pct_N`, means the data really is not 10x.
 
 Read-geometry shorthand: `8+26+98` = I1 + (16 CB + 10 UMI, v2) + cDNA. `28` = 16+12, v3. `24` =
@@ -256,7 +287,9 @@ there, so every retry fails identically.
 
 ## §iterate — run the Python directly
 
-Much faster than a pipeline run, and the only sane way to iterate on thresholds. Skip the
+Much faster than a pipeline run, and the only sane way to iterate on thresholds. It is still
+about 40 s of CPU per run at the default `--sample-window`, so run it through
+`bin/farm_run.sh`, not on the head node. Skip the
 full-file record count, which takes minutes on multi-GB inputs:
 
 ```bash

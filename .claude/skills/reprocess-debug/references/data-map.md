@@ -83,9 +83,58 @@ awk -F',' '$1=="collection"{print $2}' data/tables/datasets.csv \
 * `nf-work/` holds 259 hash-prefix dirs and hundreds of thousands of files on Lustre; `.lineage/`
   is comparable. `find` across either does not return inside the tool timeout, and neither does
   `find /`.
-* The Bash tool timeout is 120 s. Anything scanning every work dir, or decompressing a multi-GB
-  FASTQ, must be launched with `run_in_background: true` (or `nohup … &`) and polled. Do **not**
-  wrap it in `timeout 900 …` in the foreground — the tool kills the call first.
+* The Bash tool timeout is 120 s. Do **not** wrap a long command in `timeout 900 …` in the
+  foreground — the tool kills the call first.
+
+### §headnode — what may run where
+
+The session runs on a farm head node (`farm22-head1/2`). They are for editing files, talking to
+LSF and light reads, and **Arbiter** throttles anyone who uses them for compute. On 2026-10-07
+the batch-23 debug session ran, from the head node and "in the background": full-file awk
+scans of 30-110 GB dumped FASTQs (read-length runs, per-lane counts, distinct-read counts, up
+to 5 in parallel), `gzip -t` on ~9 GB of FASTQs, and a python pass over 218 published matrices.
+Arbiter reported ~300% CPU for `awk` alone and put ab76 in `penalty1` (CPU cut to 80% of 4
+cores for 30 minutes, on both head nodes). `run_in_background: true` and `nohup … &` only free
+the conversation; the work still runs on the head node.
+
+**Heavy work goes through `bin/farm_run.sh`**, which submits to LSF with `bsub -K` and returns
+the job's output and exit status. Launch the wrapper itself with `run_in_background: true` —
+queueing alone can outlast the tool timeout — and you are notified when the job ends:
+
+```bash
+W=.claude/skills/reprocess-debug/bin/farm_run.sh
+$W --name rle-SRR17720155 -- \
+  'awk "NR%4==2{l=length(\$0); if(l!=p){print NR/4, l; p=l}}" nf-work/65/c3fc80…/SRR17720155_2.fastq'
+$W --name matstats --mem 8G -- python3 logs/lsf/debug/matstats.py cands.txt logs/lsf/debug/matstats.json
+$W --name collect23 --mem 8G -- .claude/skills/reprocess-debug/bin/collect_run_logs.sh --batch 23
+```
+
+Defaults: queue `normal` (12 h limit), 1 CPU, 4 GB, `-W 4:00`, group `cellgeni`; outputs land
+in `logs/lsf/debug/<name>.<stamp>.{out,err,lsf}`. One argument after `--` runs as a bash snippet
+(pipes, globs, loops), several run as an argv. The job inherits the session's environment and
+directory, so `module` and relative paths work. **It cannot see the head node's `/tmp`**, which
+is where the agent's scratchpad lives: a helper script there is missing on the execution node,
+and an output written there lands in that node's `/tmp` and is lost (the first LSF run of
+`collect_run_logs.sh --outdir <scratchpad>` did exactly that). Keep job inputs and outputs on
+Lustre, e.g. `logs/lsf/debug/`; the wrapper refuses a `/tmp` path unless `--allow-tmp`. Several independent measurements are several
+background `farm_run.sh` calls, which LSF runs in parallel on separate nodes. Use
+`--queue transfer` for anything that needs outbound network, `--no-wait` to submit and follow
+with `bjobs -J rdebug-<name>`.
+
+| On the head node — fine | Through `farm_run.sh` |
+|---|---|
+| `triage.py`, `track_progress.py` (`iquest` is permitted), `notify.py`, `archive_run.sh`, `save_lsf_log.sh` | `collect_run_logs.sh` — `nextflow log` is a JVM over the whole trace, plus one work dir per failed task |
+| awk/grep over `mapping_qc_stats.tsv`, `links.tsv`, `sra.tsv`, the `failures`/`failed` files, SOFT files | anything that reads a FASTQ past its first few hundred thousand records |
+| `.command.err`/`.command.log` of a handful of work dirs | `gzip -t` / `pigz -t` / `md5sum` of a whole file |
+| a FASTQ's head: `zcat f.gz \| head -400000` | `wc -l`, read-length runs, per-lane or distinct-read counts over a whole file |
+| one matrix's top genes | a pass over many matrices, or many work dirs |
+| `git`, `bjobs`, editing | `infer_10x_run_recommended.py` against a work dir (`--sample-window 2000000` takes ~40 s CPU per run) |
+|  | the `§whitelist` probe at `start=1_000_000` or on more than one file |
+
+Rough line: **more than about a CPU-minute, more than about 1 GB read, or more than one process
+in parallel → LSF.** Memory-heavy work counts too: a hash of every distinct read of a 70 M-read
+file is gigabytes, so bound it (exit early past a cap, as the GSE261353 check did) and give the
+job `--mem`.
 
 ## §schemas
 

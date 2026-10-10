@@ -51,6 +51,7 @@ for the account that published them.
 | 20 | `sleepy_curie` | 2026-09-30 22:26 | OK | `81437f5c` | 104 | **94** | `batch20/sleepy_curie` (LSF job 978550) | [Batch 20-21 Post-Mortem](../../../../docs/post-mortems.md) |
 | 21 | `sick_galileo` | 2026-09-30 22:26 | OK | `9b47e66c` | 30 | **27** | `batch21/sick_galileo` (LSF job 978560) | [Batch 20-21 Post-Mortem](../../../../docs/post-mortems.md) |
 | 22 | `gloomy_church` | 2026-10-02 10:00 | OK | `1dee930b` | 73 | **29** | `batch22/gloomy_church` (LSF job 290127; first batch from `batches_deduplicated/`) | [Batch 22 Post-Mortem](../../../../docs/post-mortems.md) |
+| 23 | `exotic_dijkstra` | 2026-10-04 20:04 | OK | `950e9826` | 69 | **46** | `batch23/exotic_dijkstra` (LSF job 823507) | [Batch 23 Post-Mortem](../../../../docs/post-mortems.md) |
 
 **Every one of these is recorded `OK`.** `errorStrategy 'ignore'` keeps failed tasks out of the
 exit status, so the status column is not a verdict — batch 6 is `OK` with 7 permanent failures.

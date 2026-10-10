@@ -20,6 +20,7 @@ import argparse, collections, csv, glob, json, os, re, sys
 # First match wins. Most specific first.
 RULES = [
     ("meta-no-run-id",         r"No experiment or run ID found for"),
+    ("meta-soft-download",     r"Failed to download \S+_family\.soft"),
     ("read-counts-differ",     r"Read counts differ across selected run FASTQs"),
     ("chem-no-whitelist-hit",  r"No supported 10x run layout .*\(no whitelist hits\)"),
     ("chem-no-whitelist-rand", r"No whitelist matched .* random barcodes"),
@@ -40,6 +41,8 @@ RULES = [
     ("wget-http-error",        r"ERROR 40[0-9]|ERROR 50[0-9]"),
     ("star-sj-buffer",         r"buffer size for SJ output is too small"),
     ("star-segfault",          r"Segmentation fault"),
+    ("star-input-unreadable",  r"R1 length \(-2147483647\)"),
+    ("lustre-io-error",        r"transport endpoint shutdown|\[Errno (5|108)\]|\(Input/output error\)"),
     ("lsf-memlimit",           r"TERM_MEMLIMIT"),
     ("lsf-runlimit",           r"TERM_RUNLIMIT"),
     ("star-fatal-other",       r"EXITING because of fatal error"),
@@ -49,6 +52,7 @@ RULES = [
 # verdict, and the one-line reason it gets that verdict
 VERDICT = {
     "meta-no-run-id":         ("investigate",       "GEO sample with no SRA experiment/run — metadata gap upstream"),
+    "meta-soft-download":     ("infrastructure",    "GEO SOFT fetch failed; whole series lost. 403 = transient refusal (batch 23), 404 = no such series"),
     "read-counts-differ":     ("pipeline-bug",      "ENA _1/_2/unsuffixed mix; wrong file set selected"),
     "chem-no-whitelist-hit":  ("investigate",       "no whitelist hit at all — check the window, not the head"),
     "chem-no-whitelist-rand": ("pipeline-bug",      "starsolo re-detect disagreeing with run-level inference"),
@@ -69,6 +73,8 @@ VERDICT = {
     "wget-http-error":        ("infrastructure",    "HTTP 4xx/5xx — often transient, do not blacklist"),
     "star-sj-buffer":         ("pipeline-bug",      "raise --limitOutSJcollapsed; retries cannot help"),
     "star-segfault":          ("investigate",       "STAR SIGSEGV — check the reference and the read geometry"),
+    "star-input-unreadable":  ("infrastructure",    "R1 unreadable when STARsolo started (partial staging, Lustre eviction); rerun"),
+    "lustre-io-error":        ("infrastructure",    "Lustre I/O error or client eviction on the node; rerun"),
     "lsf-memlimit":           ("infrastructure",    "LSF killed the job, not a signal from the tool"),
     "lsf-runlimit":           ("infrastructure",    "LSF wall-clock kill"),
     "star-fatal-other":       ("investigate",       "STAR fatal error, read the block"),
@@ -256,6 +262,9 @@ def main():
 
     def dataset_of(tag):
         t = base(tag)
+        # FETCH10XMETA is tagged with the series itself, so there is nothing to join
+        if re.fullmatch(r"GSE\d+|E-[A-Z]+-\d+|PRJ[A-Z]+\d+", t):
+            return t
         return sample2dataset.get(run2sample.get(t, t)) or sample2dataset.get(t) or "unresolved"
 
     for r in rows:
