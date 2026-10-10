@@ -174,6 +174,14 @@ comma-separated accessions.
 aligner task on the next `-resume`. Adding a key to `meta` does the same to whichever process
 consumes it.
 
+**Heavy commands go to LSF, not the head node.** Sessions run on `farm22-head*`, where Arbiter
+throttles CPU-heavy users: on 2026-10-07 full-file FASTQ scans, `gzip -t` and a matrix pass, all
+run "in the background", put ab76 in `penalty1`. Backgrounding does not move work off the head
+node. Use `.claude/skills/reprocess-debug/bin/farm_run.sh --name <n> -- <cmd>` (a `bsub -K`
+wrapper; launch it with `run_in_background`), and keep the job's inputs and outputs off `/tmp`,
+which execution nodes cannot see. What counts as heavy: `reprocess-debug`'s
+`data-map.md §headnode`.
+
 **`REPROCESS10X_BAM2FASTQ`'s stub is broken** — it touches `<id>.fastq.gz` but declares
 `path("fastqs/*")`, which blocks stub-testing any BAM-origin path.
 
