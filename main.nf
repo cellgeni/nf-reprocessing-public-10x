@@ -2,40 +2,17 @@
 include { REPROCESS10X } from './workflow/main.nf'
 include { REPROCESS10X_COLLATE } from './modules/local/reprocess10x/collate'
 include { REPROCESS10X_RUNREPORT } from './modules/local/reprocess10x/runreport'
+include { validateParameters; paramsHelp; paramsSummaryLog } from 'plugin/nf-schema'
 
-// HELP MESSAGE
-def helpMessage() {
-    log.info"""
+// HELP MESSAGE: the parameter list itself is generated from nextflow_schema.json by nf-schema
+def helpBefore() {
+    """
     =============================
     Reprocess Public 10X Datasets
     =============================
     This pipeline loads and reprocesses public 10x datasets from GEO, SRA, ENA, or ArrayExpress.
 
-    Usage: nextflow run main.nf [OPTIONS]
-
-    Required:
-        --datasets          Path to a TSV file with dataset and sample IDs.
-
-    Optional:
-        --outdir            Directory to save results (default: results).
-        --default_specie    Species to assign to samples when metadata is missing or unknown.
-                            Accepted values: 'human', 'mouse'. If not set, such samples are skipped
-                            by STARsolo with a warning.
-        --no_infer_specie   Do not read species from metadata; assign --default_specie to all samples.
-                            Requires --default_specie.
-        --metaonly          Only fetch metadata, skip downloading and alignment (default: false).
-        --starsolo          Run STARsolo alignment after downloading (default: false).
-        --cellranger        Run Cell Ranger alignment after downloading (default: false, not yet implemented).
-        --help              Show this help message and exit.
-
-    Example:
-        nextflow run main.nf \\
-          --datasets examples/datasets.tsv \\
-          --outdir results \\
-          --default_specie human \\
-          -resume
-
-    == datasets.tsv format ==
+    == datasets table (tab-separated, whatever the extension) ==
     dataset_id	sample_id
     GSE230685	GSM7232572,GSM7232573
     E-MTAB-9221	ERS4689152,ERS4689153
@@ -43,8 +20,11 @@ def helpMessage() {
 
     Leaving sample_id empty processes the WHOLE series. That is intentional, but a
     series is often mixed — use --metaonly first to see what it holds.
-    ==========================
+    """.stripIndent()
+}
 
+def helpAfter() {
+    """
     == Output structure ==
     results/
     ├── raw/
@@ -71,7 +51,6 @@ def helpMessage() {
     ├── samples.tsv                 Per-sample resolved species, chemistry and run origins
     ├── run_chemistry.tsv           Per-run chemistry inference and read lengths
     └── skipped_samples.tsv         Samples dropped for want of a species (absent if none)
-    ==========================
     """.stripIndent()
 }
 
@@ -98,31 +77,26 @@ def alignerIndexRow(Map meta) {
 
 workflow {
     main:
-    // Validate input parameters and show help if needed
-    if (params.help || !params.datasets) {
-        helpMessage()
-        System.exit(params.help ? 0 : 1)
+    if (params.help) {
+        log.info paramsHelp(
+            beforeText: helpBefore(),
+            afterText : helpAfter(),
+            command   : "nextflow run main.nf --datasets data/tables/batches/batch25.csv --outdir results/batch25 --default_specie human --starsolo"
+        )
+        System.exit(0)
     }
 
-    // Every boolean flag is read as `value.toString().toLowerCase() == 'true'`, so an
-    // unrecognised but truthy value (--starsolo 1, yes, or a typo like ture) reads as
-    // FALSE. Left unchecked that downloads an entire batch, aligns nothing and exits 0
-    // without saying why. Validate all of them up front, before anything is fetched.
-    ['metaonly', 'starsolo', 'cellranger', 'no_infer_specie'].each { flag ->
-        def value = params[flag]
-        if (!(value instanceof Boolean) && !(value?.toString()?.toLowerCase() in ['true', 'false'])) {
-            log.error("Invalid value for --${flag}: '${value}'. Expected a boolean (true/false).")
-            System.exit(1)
-        }
-    }
+    // Types, enums and paths are checked against nextflow_schema.json before anything is
+    // fetched. The flags matter most: they used to be read as
+    // `value.toString().toLowerCase() == 'true'`, so a typo like `--starsolo ture` read as
+    // FALSE, downloaded a whole batch, aligned nothing and exited 0 without saying why. The
+    // schema types them as booleans, so such a value now fails here instead.
+    validateParameters()
+    log.info paramsSummaryLog()
 
-    if (params.no_infer_specie && params.default_specie == null) {
+    // The one rule the schema does not express readably: a cross-parameter requirement.
+    if (params.no_infer_specie && !params.default_specie) {
         log.error("When --no_infer_specie is set, --default_specie must be provided.")
-        System.exit(1)
-    }
-
-    if ( params.default_specie && !['human', 'mouse'].contains(params.default_specie.toLowerCase()) ) {
-        log.error("Invalid value for --default_specie: ${params.default_specie}. Expected 'human' or 'mouse'.")
         System.exit(1)
     }
 
@@ -135,10 +109,10 @@ workflow {
     cr_mouse_reference = params.cr_mouse_reference ? channel.value( tuple( [id: "mouse"], file( params.cr_mouse_reference, checkIfExists: true )) ) : channel.empty()
 
     // Define variables
-    def metaonlyflag    = params.metaonly && params.metaonly.toString().toLowerCase() == 'true' ? true : false
-    def starsoloflag    = params.starsolo && params.starsolo.toString().toLowerCase() == 'true' ? true : false
-    def cellrangerflag  = params.cellranger && params.cellranger.toString().toLowerCase() == 'true' ? true : false
-    def no_infer_specie = params.no_infer_specie && params.no_infer_specie.toString().toLowerCase() == 'true' ? true : false
+    def metaonlyflag    = params.metaonly as boolean
+    def starsoloflag    = params.starsolo as boolean
+    def cellrangerflag  = params.cellranger as boolean
+    def no_infer_specie = params.no_infer_specie as boolean
     def defaultspecie   = params.default_specie
 
     // Run main workflow

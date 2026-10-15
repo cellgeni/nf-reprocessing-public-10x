@@ -12,6 +12,7 @@ Nextflow pipeline for loading and reprocessing public 10x datasets from GEO, SRA
 | `subworkflows/` | Download and STARsolo alignment subworkflows |
 | `modules/` | Individual process modules |
 | `lib/StarsoloResources.groovy` | STARsolo memory, run limit and queue predicted from each sample's read count |
+| `nextflow_schema.json` | Parameter schema: `--help`, validation and the launch summary (nf-schema) |
 | `notebooks/resource_prediction.ipynb` | Rerun/waste analysis and the fit behind `lib/StarsoloResources.groovy` |
 | `examples/datasets.tsv` | Example input file |
 | `examples/RESUME` | Example run script |
@@ -26,6 +27,11 @@ nextflow run main.nf --datasets <datasets.tsv> [OPTIONS]
 ```
 
 ### Parameters
+
+Parameters are defined in [`nextflow_schema.json`](nextflow_schema.json) and validated at launch
+by [nf-schema](https://github.com/nextflow-io/nf-schema): a wrong type (`--starsolo ture`), an
+unknown species or a missing `--datasets` stops the run before anything is fetched.
+`nextflow run main.nf --help` prints the full list; the main ones:
 
 | Parameter | Description | Default |
 |---|---|---|

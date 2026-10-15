@@ -80,7 +80,7 @@ up to batch 21 can be re-measured.
 ## Architecture
 
 ```
-main.nf                     param validation, publish:/output: blocks, the two end-of-run tasks
+main.nf                     nf-schema validation, publish:/output: blocks, the two end-of-run tasks
 ├── workflow/main.nf        REPROCESS10X — the real orchestrator
 │   ├── modules/cellgeni/fetch10xmeta          → links.tsv, one row per run
 │   ├── subworkflows/local/download10x         → WGET10X → {BAM2FASTQ,SRA2FASTQ} → RENAME10XRUN → RENAME10XSAMPLE
@@ -205,6 +205,10 @@ which execution nodes cannot see. What counts as heavy: `reprocess-debug`'s
 StarsoloResources`), while workflow code can. Anything computed by a `lib/` class has to be put
 into `meta` in the workflow and read from there by the directive — see `meta.resources`. Adding
 that key changed STARsolo's task hash, so a pre-2026-10 batch re-runs STARsolo on `-resume`.
+
+**`nextflow_schema.json` is tracked only through a `!/nextflow_schema.json` exception** to the
+`*.json` rule in `.gitignore`. New parameters go in the schema as well as `nextflow.config`'s
+`params {}`, or `validateParameters()` warns about them and `--help` omits them.
 
 **MultiQC needs a `TMPDIR` inside the work dir.** It builds `multiqc_data/` in `TMPDIR` and copies
 it across with its modes, dropping the work dir's setgid bit, so files land in the user's primary

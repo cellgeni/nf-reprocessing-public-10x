@@ -13,6 +13,7 @@ scripts
 upload_results
 *.csv
 *.json
+!/nextflow_schema.json
 *.log
 *tsv
 *list
