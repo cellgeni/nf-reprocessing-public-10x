@@ -1,5 +1,7 @@
 // IMPORT SUBWORKFLOW
 include { REPROCESS10X } from './workflow/main.nf'
+include { REPROCESS10X_COLLATE } from './modules/local/reprocess10x/collate'
+include { REPROCESS10X_RUNREPORT } from './modules/local/reprocess10x/runreport'
 
 // HELP MESSAGE
 def helpMessage() {
@@ -62,8 +64,12 @@ def helpMessage() {
     │   ├── bam.csv                 Index of all published BAMs
     │   ├── sra.csv                 Index of all published SRA files
     │   └── starsolo.csv            Index of all STARsolo outputs
+    ├── multiqc/                    Run report: run statistics, sample status, chemistry, mapping
     ├── versions.yml                Software versions
     ├── mapping_qc_stats.tsv        Per-sample STARsolo mapping QC statistics
+    ├── datasets.tsv                Per-dataset sample, run and species counts
+    ├── samples.tsv                 Per-sample resolved species, chemistry and run origins
+    ├── run_chemistry.tsv           Per-run chemistry inference and read lengths
     └── skipped_samples.tsv         Samples dropped for want of a species (absent if none)
     ==========================
     """.stripIndent()
@@ -150,48 +156,49 @@ workflow {
         cellrangerflag
     )
 
-    // Collect versions
-    REPROCESS10X.out.versions
-        .splitText(by: 20)
-        .unique()
-        .collectFile(name: 'versions.yml', storeDir: params.outdir, sort: true)
-        .subscribe { __ -> 
-                log.info("Versions saved to ${params.outdir}/versions.yml")
-            }
-    
-    // Collect mapping QC stats
-    REPROCESS10X.out.soloqc
-        .splitCsv(sep: '\t', skip: 1)
-        .collectFile(
-            name: 'mapping_qc_stats.tsv',
-            storeDir: params.outdir,
-            newLine: true,
-            seed: "Dataset\tSample\tRd_all\tRd_in_cells\tFrc_in_cells\tUMI_in_cells\tCells\tMed_nFeature\tGood_BC\tWL\tSpecies\tPaired\tStrand\tall_u+m\tall_u\texon_u+m\texon_u\tfull_u+m\tfull_u"
-        ) { meta, row -> 
-            "${meta.id}\t${row.join('\t')}"
-        }
-        .subscribe { __ -> 
-                log.info("Mapping QC stats saved to ${params.outdir}/mapping_qc_stats.tsv")
-            }
-    
-    // Samples dropped for want of a usable species. Written with collectFile rather
-    // than a publish/output target because there is no file to publish — only the
-    // fact that the sample was dropped. collectFile writes nothing when the channel
-    // is empty, so a clean run produces no file at all.
-    REPROCESS10X.out.skipped
-        .collectFile(
-            name: 'skipped_samples.tsv',
-            storeDir: params.outdir,
-            newLine: true,
-            sort: true,
-            seed: "dataset_id\tsample_id\tspecie"
-        ) { meta ->
-            def row = unwrapGroupKeys(meta)
-            "${row.dataset_id}\t${row.id}\t${row.specie}"
-        }
-        .subscribe { __ ->
-                log.warn("Some samples were skipped for want of a species — see ${params.outdir}/skipped_samples.tsv")
-            }
+    // Run-level tables: what the collectFile blocks used to write (versions.yml,
+    // mapping_qc_stats.tsv, skipped_samples.tsv) plus datasets/samples/runs/run_chemistry.
+    // Every input is collected, so COLLATE runs once, after the last RENAME10XRUN,
+    // RENAME10XSAMPLE and MAPPINGQC; ifEmpty([]) keeps it running when a stream is empty
+    // (--metaonly, or no aligner requested). Sorted, so the task hash and -resume are stable.
+    metadata_files = REPROCESS10X.out.metadata
+        .flatMap { _meta, files -> (files instanceof List) ? files : [files] }
+
+    REPROCESS10X_COLLATE(
+        datasetlist,
+        metadata_files.filter { f -> f.name == 'links.tsv' }.collect(sort: true).ifEmpty([]),
+        metadata_files.filter { f -> f.name.endsWith('.sample_x_run.tsv') }.collect(sort: true).ifEmpty([]),
+        REPROCESS10X.out.chemistry.map { _meta, json -> json }.collect(sort: true).ifEmpty([]),
+        REPROCESS10X.out.soloqc.map { _meta, tsv -> tsv }.collect(sort: true).ifEmpty([]),
+        REPROCESS10X.out.versions.collect(sort: true).ifEmpty([]),
+        REPROCESS10X.out.fastq.map { meta, _fastqs -> unwrapGroupKeys(meta) }.toSortedList { a, b -> a.id <=> b.id },
+        REPROCESS10X.out.skipped.map { meta -> unwrapGroupKeys(meta) }.toSortedList { a, b -> a.id <=> b.id }
+    )
+
+    // The run report. It reads this run's own trace, which nextflow.config writes to
+    // reports/execution_trace_<trace_report_suffix>.txt (keep the two in step). Its inputs
+    // collect COLLATE's tables and every aligner output, so by the time it starts every
+    // other task has finished and the trace holds all of them.
+    trace_file = file("${workflow.launchDir}/reports/execution_trace_${params.trace_report_suffix}.txt")
+    run_info = [
+        runName    : workflow.runName,
+        sessionId  : workflow.sessionId.toString(),
+        commitId   : workflow.commitId ?: '',
+        commandLine: workflow.commandLine,
+        start      : workflow.start.toString(),
+    ]
+
+    REPROCESS10X_RUNREPORT(
+        REPROCESS10X_COLLATE.out.tables,
+        REPROCESS10X.out.starsolo.map { _meta, dir -> dir }.collect().ifEmpty([]),
+        REPROCESS10X.out.cellranger.map { _meta, dir -> dir }.collect().ifEmpty([]),
+        trace_file,
+        run_info,
+        REPROCESS10X.out.planned
+            .map { meta -> [meta.id, meta.resources?.reads, meta.resources?.mem_gb?.getAt(0), meta.resources?.hours?.getAt(0)] }
+            .collect(flat: false)
+            .ifEmpty([])
+    )
 
     publish:
     metadata       = REPROCESS10X.out.metadata.map { meta, files -> tuple(unwrapGroupKeys(meta), files) }
@@ -205,6 +212,8 @@ workflow {
     starsolo   = REPROCESS10X.out.starsolo.map { meta, starsolo -> alignerIndexRow(unwrapGroupKeys(meta)) + [path: starsolo] }
     soloqc     = REPROCESS10X.out.soloqc.map { meta, soloqc -> meta.getGroupTarget() + [path: soloqc] }
     cellranger = REPROCESS10X.out.cellranger.map { meta, cellranger -> alignerIndexRow(unwrapGroupKeys(meta)) + [path: cellranger] }
+    tables     = REPROCESS10X_COLLATE.out.tables.flatten()
+    report     = REPROCESS10X_RUNREPORT.out.report.mix(REPROCESS10X_RUNREPORT.out.data)
 }
 
 output {
@@ -289,6 +298,14 @@ output {
             sep ','
         }
         path { output -> "cellranger/${output.dataset_id}/" }
+    }
+    tables {
+        // at the outdir root, where mapping_qc_stats.tsv & co. have always been; a plain
+        // `path "."` would keep COLLATE's tables/ subdir
+        path { table -> table >> table.name }
+    }
+    report {
+        path "multiqc"
     }
 
 }

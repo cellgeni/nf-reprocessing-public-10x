@@ -41,6 +41,8 @@ run by the `Launching \`main.nf\` [<run_name>]` line on line 2 of that file.
 | `data/tables/batches/batch<N>.csv` | the input table for batches 1-21. Its `batch22`-`batch49` were **never run** and are superseded: same names, older and duplicated contents |
 | `data/tables/upload_batch<N>.csv` | delivery manifest, genuinely comma-separated: `id,dataset_id,path` |
 | `results/batch<N>/` | outdir |
+| `results/batch<N>/{datasets,samples,runs,run_chemistry}.tsv` | run tables from `REPROCESS10X_COLLATE` (runs from 2026-10 on). `runs.tsv` maps **every** run in `links.tsv` to its sample and dataset, including runs that failed before `RENAME10XRUN`, so it is the attribution table `searchlist.tsv` never reliably was |
+| `results/batch<N>/multiqc/multiqc_report.html` | `REPROCESS10X_RUNREPORT`: task outcomes and wasted core-h per process, a status for every sample with the stage/process/exit/work dir of its last failure, chemistry, mapping, STARsolo predicted vs observed resources. Its tables are in `multiqc/multiqc_data/multiqc_*_table.txt`. Rebuild it against a **live** run with `run_report.py` standalone (its docstring) via `farm_run.sh` |
 | `logs/lsf/reprocess{Output,Error}<JOBID>.log` | driver stdout/stderr from the bsub |
 | `reports/execution_trace_<ts>.txt` | live trace, **16 columns** — a different, smaller schema than `runlogs<N>.tsv` |
 | `reports/failures_<ts>.tsv` | one hand-made manifest from batch 3; same schema as `failures<N>.tsv` |

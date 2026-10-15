@@ -80,14 +80,22 @@ up to batch 21 can be re-measured.
 ## Architecture
 
 ```
-main.nf                     param validation, publish:/output: blocks, versions + QC collection
-└── workflow/main.nf        REPROCESS10X — the real orchestrator
-    ├── modules/cellgeni/fetch10xmeta          → links.tsv, one row per run
-    ├── subworkflows/local/download10x         → WGET10X → {BAM2FASTQ,SRA2FASTQ} → RENAME10XRUN → RENAME10XSAMPLE
-    ├── subworkflows/local/starsolo10x         → instantiated twice, once per species
-    ├── modules/cellgeni/cellranger/count      → likewise, human + mouse
-    └── modules/local/reprocess10x/mappingqc   → one QC job per dataset, across all its species
+main.nf                     param validation, publish:/output: blocks, the two end-of-run tasks
+├── workflow/main.nf        REPROCESS10X — the real orchestrator
+│   ├── modules/cellgeni/fetch10xmeta          → links.tsv, one row per run
+│   ├── subworkflows/local/download10x         → WGET10X → {BAM2FASTQ,SRA2FASTQ} → RENAME10XRUN → RENAME10XSAMPLE
+│   ├── subworkflows/local/starsolo10x         → instantiated twice, once per species; sets meta.resources
+│   ├── modules/cellgeni/cellranger/count      → likewise, human + mouse
+│   └── modules/local/reprocess10x/mappingqc   → one QC job per dataset, across all its species
+├── modules/local/reprocess10x/collate         → run-level tables (mapping_qc_stats.tsv, versions.yml, datasets/samples/runs/run_chemistry.tsv)
+└── modules/local/reprocess10x/runreport       → parses the run's own trace + those tables, then MultiQC → <outdir>/multiqc/
 ```
+
+COLLATE and RUNREPORT replaced the `collectFile` blocks `main.nf` used to carry; don't bring
+`collectFile` back. Both collect every stream they read (`.collect().ifEmpty([])`), so each runs
+once, after everything else, and RUNREPORT reads a trace that already holds every other task.
+The trace path is rebuilt in `main.nf` from `params.trace_report_suffix` — keep it in step with
+`trace.file` in `nextflow.config`.
 
 `modules/cellgeni/*` are registry modules (imported bare, e.g. `from 'cellgeni/fetch10xmeta'`,
 and carrying a `.module-info` checksum); `modules/local/*` are repo-local and imported by
@@ -163,8 +171,11 @@ The consequence for debugging: **`attempt=2` is not diagnostic of anything.** It
 of the config, not a signal about the failure — 1795 of 1814 August 2026 failures sat there.
 What matters is whether any attempt later succeeded.
 
-**`errorStrategy 'ignore'` means failures never reach the pipeline exit status**, and there is
-no failure manifest, so post-mortems have to be mined out of the logs.
+**`errorStrategy 'ignore'` means failures never reach the pipeline exit status.** Since 2026-10
+the run report's *Samples without a mapped output* table (`<outdir>/multiqc/`) lists every sample
+that did not end in a STARsolo output, with the stage, process, exit class and work dir of its
+last failure; the stderr and the classification still come from `collect_run_logs.sh` and
+`triage.py`.
 
 **Two `sra2fastq` modules exist and only one is wired up.** `download10x` imports
 `modules/cellgeni/sra2fastq`; `modules/local/reprocess10x/sra2fastq/` — the more careful
@@ -194,6 +205,10 @@ which execution nodes cannot see. What counts as heavy: `reprocess-debug`'s
 StarsoloResources`), while workflow code can. Anything computed by a `lib/` class has to be put
 into `meta` in the workflow and read from there by the directive — see `meta.resources`. Adding
 that key changed STARsolo's task hash, so a pre-2026-10 batch re-runs STARsolo on `-resume`.
+
+**MultiQC needs a `TMPDIR` inside the work dir.** It builds `multiqc_data/` in `TMPDIR` and copies
+it across with its modes, dropping the work dir's setgid bit, so files land in the user's primary
+group — which has no quota on `/lustre` ("Disk quota exceeded"). RUNREPORT exports one.
 
 **`REPROCESS10X_BAM2FASTQ`'s stub is broken** — it touches `<id>.fastq.gz` but declares
 `path("fastqs/*")`, which blocks stub-testing any BAM-origin path.

@@ -25,6 +25,7 @@ workflow STARSOLO10X {
 
     emit:
     mapping      = REPROCESS10X_STARSOLO10X.out.mapping
+    planned      = with_resources.map { meta, _fastqs -> meta }  // every sample's meta.resources, failed or not
     versions     = REPROCESS10X_STARSOLO10X.out.versions.first()
 
 }

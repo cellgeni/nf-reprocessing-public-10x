@@ -284,5 +284,6 @@ workflow DOWNLOAD10X {
     fastq          = fastqs
     bam            = bams
     sra            = sras
+    chemistry      = RENAME10XRUN.out.chemistry  // [ meta, <run>.chemistry.json ], for the run report
     versions       = versions
 }

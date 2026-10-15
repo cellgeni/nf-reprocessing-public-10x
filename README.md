@@ -92,10 +92,23 @@ results/
 │   ├── bam.csv                     Index of all published BAMs
 │   ├── sra.csv                     Index of all published SRA files
 │   └── starsolo.csv                Index of all STARsolo outputs
-├── skipped_samples.tsv            Samples dropped for want of a usable species (absent if none)
-├── versions.yml                    Software versions used by each process
-└── mapping_qc_stats.tsv            Per-sample STARsolo mapping QC statistics
+├── multiqc/
+│   ├── multiqc_report.html         Run report (see below)
+│   └── multiqc_data/               Everything the report plots, as tables
+├── mapping_qc_stats.tsv            Per-sample STARsolo mapping QC statistics
+├── datasets.tsv                    Per dataset: samples requested / found / resolved / skipped / mapped, runs
+├── samples.tsv                     Per sample: resolved species, chemistry, whitelist, runs and origin
+├── runs.tsv                        Per run: sample, dataset, data type, species
+├── run_chemistry.tsv               Per run: inferred chemistry, confidence, read lengths, warnings
+├── skipped_samples.tsv             Samples dropped for want of a usable species (absent if none)
+└── versions.yml                    Software versions used by each process
 ```
+
+The run-level tables are written by `REPROCESS10X_COLLATE` and the report by
+`REPROCESS10X_RUNREPORT`, the last two tasks of a run. The report (MultiQC) covers task outcomes
+and wasted compute per process, the status of every sample (mapped, skipped, or the stage and exit
+code it failed at), chemistry calls, STARsolo mapping metrics, predicted vs observed STARsolo
+resources, and software versions.
 
 ## STARsolo resources
 

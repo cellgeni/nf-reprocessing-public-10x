@@ -15,6 +15,12 @@ readable in a browser rather than as a file on the farm. The write-up is built f
 > listed in the Archive column below. Both are kept deliberately: the artifact is the readable
 > one, the archive is the durable one.
 
+> **Every run also writes its own report.** Since 2026-10 the pipeline ends with a MultiQC run
+> report at `results/<run>/multiqc/multiqc_report.html` (archived as `multiqc_report.html.gz`
+> next to the post-mortem): task outcomes and wasted compute per process, the status of every
+> sample and where each failure happened, chemistry, mapping, and STARsolo resources. It is the
+> starting point; a post-mortem adds the stderr, the classification and the attribution.
+
 ## Published
 
 | Report | Covers | Published | Archive |
