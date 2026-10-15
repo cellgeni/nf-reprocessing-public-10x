@@ -19,9 +19,13 @@ import argparse, collections, csv, glob, json, os, re, sys
 # --------------------------------------------------------------------- rules
 # First match wins. Most specific first.
 RULES = [
+    # First because a full disk breaks whatever happened to be writing (pigz, wget,
+    # STAR's .exitcode), and the tool's own message after it would mislead. Batch 24.
+    ("disk-quota",             r"Disk quota exceeded|No space left on device"),
     ("meta-no-run-id",         r"No experiment or run ID found for"),
     ("meta-soft-download",     r"Failed to download \S+_family\.soft"),
     ("read-counts-differ",     r"Read counts differ across selected run FASTQs"),
+    ("chem-atac-only",         r"Detected ATAC-only 10x run"),
     ("chem-no-whitelist-hit",  r"No supported 10x run layout .*\(no whitelist hits\)"),
     ("chem-no-whitelist-rand", r"No whitelist matched .* random barcodes"),
     ("chem-ambiguous-layout",  r"No supported 10x run layout"),
@@ -51,6 +55,8 @@ RULES = [
 
 # verdict, and the one-line reason it gets that verdict
 VERDICT = {
+    "disk-quota":             ("infrastructure",    "group quota or disk full; free space and rerun"),
+    "chem-atac-only":         ("correct-rejection", "ATAC library; must not be aligned as GEX"),
     "meta-no-run-id":         ("investigate",       "GEO sample with no SRA experiment/run — metadata gap upstream"),
     "meta-soft-download":     ("infrastructure",    "GEO SOFT fetch failed; whole series lost. 403 = transient refusal (batch 23), 404 = no such series"),
     "read-counts-differ":     ("pipeline-bug",      "ENA _1/_2/unsuffixed mix; wrong file set selected"),
