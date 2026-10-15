@@ -52,6 +52,9 @@ for the account that published them.
 | 21 | `sick_galileo` | 2026-09-30 22:26 | OK | `9b47e66c` | 30 | **27** | `batch21/sick_galileo` (LSF job 978560) | [Batch 20-21 Post-Mortem](../../../../docs/post-mortems.md) |
 | 22 | `gloomy_church` | 2026-10-02 10:00 | OK | `1dee930b` | 73 | **29** | `batch22/gloomy_church` (LSF job 290127; first batch from `batches_deduplicated/`) | [Batch 22 Post-Mortem](../../../../docs/post-mortems.md) |
 | 23 | `exotic_dijkstra` | 2026-10-04 20:04 | OK | `950e9826` | 69 | **46** | `batch23/exotic_dijkstra` (LSF job 823507) | [Batch 23 Post-Mortem](../../../../docs/post-mortems.md) |
+| 24 | `infallible_sax` | 2026-10-07 09:00 | ERR | `15f523ff` | 150 | **121** | `batch24/infallible_sax` (LSF job 223884; killed by owner after 2d 23h; first batch from `batches_deduplicated_sorted/`) | [Batch 24 Post-Mortem](../../../../docs/post-mortems.md) |
+| 24 | `tender_torricelli` | 2026-10-10 08:14 | ERR | `15f523ff` | 138 | **126** | `batch24/tender_torricelli` (LSF job 741756; `-resume` of the above; group quota full from ~12:20, JVM crash 21:05; `debug/` holds the outage analysis). `disturbed_minsky` (LSF 741372, 08:10, 3 min, new session `42550d94`) was a false start in between and is not archived | [Batch 24 Post-Mortem](../../../../docs/post-mortems.md) |
+| 24 | `peaceful_aryabhata` | 2026-10-12 11:41 | ERR | `15f523ff` | 50 | **44** | `batch24/peaceful_aryabhata` (LSF job 965399; `-resume` with `batch24_left.csv`, the 288 samples the quota outage spoiled; killed by owner after 2d 21h with 4 STARsolo tasks running, none of which could have finished. COLLATE/RUNREPORT never ran, so no run tables; `debug/` holds the per-attempt STARsolo evidence and the run's concatenated `solo_qc`) | none yet |
 
 **Every one of these is recorded `OK`.** `errorStrategy 'ignore'` keeps failed tasks out of the
 exit status, so the status column is not a verdict — batch 6 is `OK` with 7 permanent failures.

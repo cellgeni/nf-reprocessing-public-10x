@@ -50,6 +50,7 @@ failures are a different population, so do not expect the August shape.
 | 21 | `sick_galileo` | 30 | **27** | A short failure list and the batch's biggest loss outside it: **`FETCH10XMETA` dropped 159 of 873 samples at exit 0** (GSE246613 147, GSE247111 12, shared BioSample) and published 112 pooled matrices, most under the TCR/CellPlex GSM's name. 3 self-healed (truncated gzip). The 27: 18 split-mate (GSE247205, 9 samples), 8 truncated-UMI `len=27` (GSE247827, whole dataset; `10,11` dry-run accepts it), 1 0-spot SRA run. 123 of 701 aligned (17.5%) not GEX, 108 of them V(D)J (GSE247531 alone 89). 114 of 815 alignments (14.0%, 1,245 CPU-h) duplicates; 24 samples also aligned in batch 20 (GSE245187 = GSE246960). 172 samples lost, all recoverable. Work dirs for batches 6-19 found deleted this session. |
 | 22 | `gloomy_church` | 73 | **29** | **The first batch from `batches_deduplicated/`, and 0 duplicate alignments** (1,838 QC rows = 1,838 samples). 44 self-healed: **35 × STARsolo `lsf-memlimit`** at 128 GB, every one a sample of ≥ 1.35 × 10⁹ reads, 2,686 core-h (7.6% of the stage), plus 9 truncated gzip. Of the 29, 19 are harmless (18 index-only runs in GSE248788/GSE249894/GSE250444, one 2,686-spot run), which `triage.py` leaves as "investigate". **New: SRA runs whose read layout changes partway through** (lanes with 3 vs 2 reads per spot, or R1/R2 loaded as consecutive single-end spots) fail `SRA2FASTQ`'s mate-count guard with the data complete — 3 samples (GSE249159 ×2, GSE248489 ×1, `§open`). **New: ENA FASTQs corrupt at source** — 4 files of 2 GSE249894 runs fail `pigz -t` while matching ENA's own `fastq_md5` (`§open`). The shared-BioSample drop recurred (GSE254170, 1 lost, 1 pooled). A mate-less run cost data for the first time (`GSM7996301`, 7.7% of reads), because deduplicated input no longer supplies a rescuing duplicate. **190 of 1,838 aligned (10.3%) not GEX**, 116 V(D)J; the title scan flagged 44 healthy GEX (GSE249313, `scRNA-seq and TCR profiling …`) and missed 20. 4 of 1,842 samples lost, 3 published partial, all recoverable. |
 | 23 | `exotic_dijkstra` | 69 | **46** | **The largest loss since batch 21, and from a new cause: a 10-minute GEO refusal.** From 20:25 to 20:35 on 2026-10-04 GEO (through the Sanger proxy) answered 403 to `_family.soft.gz` requests; `collect_metadata.sh` only retries 503 and Nextflow resubmits at once, so **31 series used all 5 `FETCH10XMETA` attempts inside the window: 180 of 1,750 samples (10.3%) lost**, every URL fine on 2026-10-07 (`§open`). The shared-BioSample drop recurred for the sixth batch (GSE254250: 8 lost, 6 `_VDJ` GSMs published holding their donor's GEX runs). Two Lustre incidents on 2026-10-05 (04:44, 21:21-21:26) failed 14 attempts; 12 healed, `GSM8155160` did not (its one exit-1 retry started 15 s later, inside the event), and `SRR28374829`'s `SRA2FASTQ` **hung for 24 h on 16 cores** after a `pigz` I/O error until killed (`TERM_OWNER`), holding the end of the run ~9 h — `SRA2FASTQ` has no `time` (`§open`). 2 lost to the strand-test segfault (GSE259378), 3 to SRA runs with a block of spots missing a read (GSE256490 ×2, GSE262151). 9 harmless/correct (4 index-only, 3 `_oligo`, 2 MiSeq Ig amplicons). **New pathology:** GSE261353 deposited a placeholder cDNA read (8-20 distinct sequences per run) for 6 samples, published with no matrix. **167 of 1,551 aligned (10.8%) not GEX**, 100 V(D)J; the title scan had 8 false positives (`… sgRNA pool N`) and missed 34. 0 duplicate alignments; 1 STARsolo memory kill (35 in batch 22). 194 of 1,750 samples lost, all recoverable; 0 partial. Hold list `data/tables/hold_batch23.tsv` (182 hold, 31 review); rerun list `data/tables/rerun_batch23.csv`. |
+| 24 | `peaceful_aryabhata` (the `batch24_left` re-run) | 50 | **44** | 270 of 288 samples aligned. **Every STARsolo failure was deterministic**, so the owner's kill lost nothing: 5 samples hit the Velocyto segfault after Gene/GeneFull were written (#32) on every attempt: 3 GEX (5.7-11.6e9 reads, two of them on `737K`) and 2 CRISPRa guide libraries accepted as GEX (`SRS21217049`, `SRS21216563`; ENA library names `*_guides_*`), GSE311359's 7 hit the paired-end 3M crash (#31), `SRS21216564` (18e9 reads) hit `TERM_MEMLIMIT` at the 512 GB cap twice, and `DRS438312` hit the 48 h limit. ~5,400 core-h on STARsolo attempts that produced nothing; 16.7 TB of `_STARtmp` left in their work dirs. `SRS7154259` (5.26e9 reads, `737K`) **completed with Velocyto**, so >2³² reads is not sufficient for #32; it also pools 8 libraries from 5 donors. New: FETCH10XMETA's BioSample-keyed run selection pooled feature-barcode/ADT/HTO runs and other donors' libraries into 4 published matrices and into `DRS438312` (`issues/2026-10-15-batch24-biosample-runs-pool-other-libraries.md`); 6 PRJNA524398 runs are unreadable in SRA itself (`null-name-column`, `docs/archive-pathologies.md`). |
 
 Batch 6 is the useful worked example: `.nextflow/history` records it `OK`, and it still had 7
 permanent failures. `errorStrategy 'ignore'` means a green run tells you nothing.
@@ -215,7 +216,13 @@ it is a reason to run §4.
   every attempt that got that far: 6 attempts across batches 18 and 19, ~1,360 core-hours. It
   cannot be worked around from `ext.args`: STAR rejects the repeated `--soloFeatures` with
   `FATAL INPUT ERROR: duplicate parameter` (measured). Needs a container flag. Drafted in
-  `issues/2026-09-30-batch18-19-velocyto-segfault-discards-good-matrix.md`.
+  `issues/2026-09-30-batch18-19-velocyto-segfault-discards-good-matrix.md`. **Batch 24 again:**
+  `SRS21217049` (4.82 × 10⁹ reads, 10.5 h per attempt) and `SRS21216563` (8.08 × 10⁹, 16.7 h,
+  419 GB `_STARtmp` left behind), both PRJNA1108254, single-end. All three cases
+  are past 2³² reads, and no sample above 2³² has ever completed (archive maximum 3.68 × 10⁹).
+  STARsolo keeps read indices in `uint32` (`rGeneUMI`, `uintRead`), so an overflow is the likely
+  mechanism; this was inferred, not reproduced. Any sample over ~4.29 × 10⁹ reads should be
+  expected to die here. **GitHub #32**; same planned guard as #31.
 * **ENA's two-file FASTQ can omit the barcode read.** For a run SRA stores as 3-4 reads per
   spot, ENA exports two files, and it can drop the 28 bp barcode read (`SRR25819675`: SRA
   holds 91, 28, 8; ENA serves 91 + 8). `parse_metadata.sh` prefers `ENAFQ` whenever a `_1`/`_2`
@@ -302,6 +309,18 @@ it is a reason to run §4.
   3'-only `--wl` saves every case seen. 68 samples across batches 9, 14, 15 and 20, **70 with
   batch 23** (GSE259378 ×2: `gex_3pv3_family`, 150 bp R1, Reverse by 6 and 2 points; the
   other 26 samples of the series aligned `Single`/`Forward`).
+  **Root cause revised 2026-10-13 (batch 24): the crash is STAR's `--soloBarcodeMate` +
+  `Velocyto` path with a large (3M) whitelist, not the strand test.** Reproduced on 200k reads with
+  `NoSharedMemory`. It crashes regardless of UMI length or clip. It passes without Velocyto,
+  passes single-end, and passes with a small whitelist. The same 5′ v2 reads pass on `737K` and
+  crash on a 4.4M list. 117 PE samples on `737K` completed in batch 24; no PE sample on a 3M list
+  has ever completed. **This also kills genuine 5′ GEM-X data** (GSE311359, all 7 samples,
+  `%rev` 64 vs `%fwd` 13), so skipping the test for 3′-only `--wl` is not enough. 77 samples
+  in total. **GitHub #31**; repro in `logs/lsf/debug/segv_repro*.sh`. Repo-side guard planned,
+  not applied: `issues/2026-10-13-batch24-velocyto-guard-plan.md`. **Upgrading STAR does not
+  fix it** (2026-10-15): 2.7.11b, which carries 2.7.10b's "fixed seg-faults introduced in
+  2.7.10a" (#1469/#1602/#1608), crashes on the same call at the same point (after thread
+  creation), and passes without Velocyto; `logs/lsf/debug/segv_repro_2711b/`.
 * **`FETCH10XMETA` gives up on a GEO 403 at once, and its retries are immediate.**
   `collect_metadata.sh` fetches `_family.soft.gz` with `wget --retry-on-http-error=503`; a 403 is
   final, the task exits in about a second, and Nextflow resubmits at once. Batch 23: GEO, through
