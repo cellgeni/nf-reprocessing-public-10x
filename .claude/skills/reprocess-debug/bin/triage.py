@@ -88,6 +88,52 @@ VERDICT = {
     "UNCLASSIFIED":           ("investigate",       "read the block in full"),
 }
 
+# What a category means for the sample it blocks, as bin/sample_failures.py reports
+# it: reason, failedgroup (rerun / terminate / review), modality, is10x, and a caveat
+# for the comment where the mapping is known to be wrong some of the time. Keep it
+# in step with RULES and VERDICT: every category needs an entry.
+SAMPLE_REASON = {
+    "disk-quota":             ("infrastructure", "rerun", "unknown", "unknown", ""),
+    "chem-atac-only":         ("unsupported modality", "terminate", "atac", "yes", ""),
+    "meta-no-run-id":         ("no link available", "terminate", "unknown", "unknown",
+                               "GEO sample with no SRA/ENA run behind it"),
+    "meta-soft-download":     ("infrastructure", "rerun", "unknown", "unknown",
+                               "GEO refused or lost the SOFT file; a 404 means the series does not exist"),
+    "read-counts-differ":     ("pipeline bug", "rerun", "unknown", "yes", "wrong ENA file set selected"),
+    "chem-no-whitelist-hit":  ("not 10x", "terminate", "unknown", "no",
+                               "can also be an ENA FASTQ pair that omits the barcode read (#15)"),
+    "chem-no-whitelist-rand": ("pipeline bug", "rerun", "gex", "yes", "STARsolo re-detection disagrees with run-level inference"),
+    "chem-ambiguous-layout":  ("pipeline bug", "rerun", "unknown", "yes", "layout matched nothing the inference accepts (too strict)"),
+    "no-single-gex-r2":       ("unsupported modality", "terminate", "feature-barcode", "yes",
+                               "R2 too short for GEX; can also be split-mate barcode halves or concatenated reads (#11)"),
+    "bc-variable-length":     ("pipeline bug", "rerun", "gex", "yes", "quality-trimmed barcode read rejected (too strict)"),
+    "r1-len-differs-runs":    ("pipeline bug", "rerun", "gex", "yes", ""),
+    "chem-group-mismatch":    ("pipeline bug", "rerun", "gex", "yes", "runs of one sample disagree on chemistry"),
+    "chem-json-unreadable":   ("pipeline bug", "rerun", "unknown", "yes", "empty or invalid chemistry.json reached RENAME10XSAMPLE"),
+    "truncated-gzip":         ("infrastructure", "rerun", "unknown", "unknown", "truncated download"),
+    "corrupt-fastq":          ("broken and no substitute", "terminate", "unknown", "unknown", "malformed FASTQ record in the archive copy"),
+    "sra-zero-length-read":   ("submission error", "terminate", "unknown", "unknown", "a read has zero length in the archive"),
+    "sra-too-few-fastq":      ("submission error", "terminate", "unknown", "unknown",
+                               "wrong number of reads per spot; split deposits can be recovered (#8)"),
+    "sra-mate-mismatch":      ("submission error", "terminate", "unknown", "unknown",
+                               "mates at different depths; mixed spot layouts can be recovered (#18)"),
+    "sra-ragged-output":      ("submission error", "terminate", "unknown", "unknown", "ragged fastq-dump output"),
+    "wget-empty-url":         ("no link available", "terminate", "unknown", "unknown", "no download URL in the archive metadata"),
+    "wget-exhausted":         ("infrastructure", "rerun", "unknown", "unknown", "transfer dropped after in-job retries"),
+    "wget-http-error":        ("infrastructure", "rerun", "unknown", "unknown", "HTTP 4xx/5xx, often transient"),
+    "star-sj-buffer":         ("pipeline bug", "rerun", "gex", "yes", "raise --limitOutSJcollapsed"),
+    "star-segfault":          ("pipeline bug", "rerun", "gex", "yes", "STAR segfault, deterministic: Velocyto in the paired-end call on a 3M whitelist (#31) or Velocyto after mapping on a >4e9-read sample (#32); rerun only after the Velocyto guard"),
+    "star-input-unreadable":  ("infrastructure", "rerun", "gex", "yes", "FASTQ unreadable when STARsolo started"),
+    "lustre-io-error":        ("infrastructure", "rerun", "unknown", "unknown", "Lustre I/O error"),
+    "lsf-memlimit":           ("infrastructure", "rerun", "unknown", "unknown", "LSF memory kill on every attempt"),
+    "lsf-runlimit":           ("infrastructure", "rerun", "unknown", "unknown", "LSF wall-clock kill"),
+    "star-fatal-other":       ("unknown", "review", "gex", "yes", "STAR fatal error"),
+    "no-error-captured":      ("unknown", "review", "unknown", "unknown", "no stderr captured"),
+    "UNCLASSIFIED":           ("unknown", "review", "unknown", "unknown", "error matched no rule"),
+}
+assert set(SAMPLE_REASON) == set(VERDICT) == {n for n, _ in RULES} | {"UNCLASSIFIED"}, \
+    "RULES, VERDICT and SAMPLE_REASON must name the same categories"
+
 
 def classify(text):
     return next((n for n, p in RULES if re.search(p, text)), "UNCLASSIFIED")

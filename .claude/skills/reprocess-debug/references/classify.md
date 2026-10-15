@@ -18,9 +18,18 @@ Two properties matter when you read its output:
   memory kills wearing exit 130. `triage.py` prints every unclassified row with its work dir for
   exactly this reason. Read them; do not add a rule until you know what you are naming.
 
-Adding a rule: put it above the more general pattern it must beat, give it a `VERDICT` entry in
-the same commit, and re-run the batch-3 regression (`verify.md §regression`) to see what it
-stole.
+Adding a rule: put it above the more general pattern it must beat, give it a `VERDICT` entry
+**and a `SAMPLE_REASON` entry** in the same commit, and re-run the batch-3 regression
+(`verify.md §regression`) to see what it stole. An assert at import time refuses a category
+missing from either table. `SAMPLE_REASON` says what the category means for the sample it
+blocks (reason, rerun/terminate/review, modality, is10x, caveat); `bin/sample_failures.py`
+reads it, so the per-sample table can't drift from the rules.
+
+`disk-quota` and `chem-atac-only` were added on 2026-10-12 (batch 24). The batch-3 and batch-5
+regressions were unchanged, and only batch 24's counts moved (12 rows from `UNCLASSIFIED` to
+`disk-quota`). `disk-quota` sits first on purpose. A full disk breaks whatever happens to be
+writing, and the guard that trips next is not the cause, so `sample_failures.py` also checks the
+whole stderr for it, not only `first_error`.
 
 ## §shape — two commands before anything else
 

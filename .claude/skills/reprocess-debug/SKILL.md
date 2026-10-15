@@ -330,6 +330,7 @@ dataset by size, and `run_reads.tsv` records each run's read count and where it 
 | `bin/collect_run_logs.sh` | run/batch → `runlogs`, `failedjobs`, `failed.log`, `failures` manifest |
 | `bin/triage.py` | manifest → classified, attributed, verdicts, `--json <path>` |
 | `bin/archive_run.sh` | a finished run → a complete record under `/nfs/cellgeni/reprocessing-runs/` |
+| `bin/sample_failures.py` | run → `sample_failures<N>.csv`, one row per requested sample without a usable output (is10x, modality, failedgroup rerun/terminate/review, reason, comments); `--combine` rebuilds `/nfs/cellgeni/reprocessing-runs/sample-failures.csv`. Called by `archive_run.sh` |
 | `bin/resolve_run.sh` | sourced helper: batch → run name, LSF job id, report stamp |
 | `bin/save_lsf_log.sh` | copies a run's LSF driver log to NFS immediately, ahead of the full archive |
 | `bin/track_progress.py` | progress vs. the deduplicated to-do list (`data/tables/batches_deduplicated/`) — iRODS + local results, appends to `progress-counter.tsv` |
@@ -364,3 +365,13 @@ thing standing between you and an unverifiable claim.
 
 Nothing is skipped silently; a missing or oversized file is recorded in `manifest.txt`. Then add
 the run to `references/run-index.md`.
+
+It also builds `sample_failures<N>.csv` (`bin/sample_failures.py`): every requested sample
+without a usable output, with why and whether to rerun or terminate it. It covers task failures,
+unfinished tasks, samples FETCH10XMETA never emitted, species skips, and the silent outputs
+(STARsolo exit 0 with an empty Gene matrix, or a non-GEX library). After writing the archive it
+rebuilds the cross-run `/nfs/cellgeni/reprocessing-runs/sample-failures.csv`. **Archive before
+`results/` and `nf-work` are cleaned.** The output check reads the published STARsolo
+`Summary.csv` files and the work dirs supply `chemistry.json` evidence; once both are gone, only
+the stderr in `failed<N>.log` is left to classify from. `data-map.md §sample-failures` has the
+columns and vocabulary.

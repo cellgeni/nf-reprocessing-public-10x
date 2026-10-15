@@ -8,6 +8,15 @@ them, verifying a claim against the work directories — lives in the `reprocess
 under [`.claude/skills/reprocess-debug/`](../.claude/skills/reprocess-debug/), which is the
 right place to start if you have a specific run to triage.
 
+**Per-sample record.** `/nfs/cellgeni/reprocessing-runs/sample-failures.csv` lists, for every
+archived run from batch 24 on, each requested sample that did not end in a usable output. Each
+row has whether it is 10x, its modality, `rerun` / `terminate` / `review`, a reason
+(unsupported modality, not 10x, no link available, broken and no substitute, submission error,
+no reference for species, pipeline bug, infrastructure, terminated run) and a comment with the
+error itself. It includes the failures no task reports: matrices STARsolo published empty, and
+non-GEX libraries that aligned. Each run's own copy is `sample_failures<N>.csv` in its archive
+folder. Columns are described in the skill's `references/data-map.md §sample-failures`.
+
 ## Two things that make failures hard to read
 
 **A run that finished `OK` tells you nothing.** Every process sets `errorStrategy 'ignore'`, so

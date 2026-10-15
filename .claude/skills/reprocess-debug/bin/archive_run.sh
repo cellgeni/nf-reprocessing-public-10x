@@ -185,6 +185,30 @@ fi
 # -s not -f: a failed run above leaves a zero-byte file, which is worse than none
 [[ -s "$TRIAGE_SRC" ]] && add "$TRIAGE_SRC" "triage${N}.json" 0
 
+# Per-sample failure table: one row per requested sample without a usable output,
+# with is10x / modality / failedgroup / reason / comments (sample_failures.py).
+# Always rebuilt, never reused: a run and its -resume share N, so a file left by the
+# other run would describe the wrong run. Built from the run's own input table, and
+# while results/ and nf-work still exist — afterwards only the stderr in
+# failed<N>.log is left to classify from, and the output check has nothing to read.
+SF_SRC="data/tables/sample_failures${N}.csv"
+SF_TRACE="reports/execution_trace_${STAMP}.txt"
+[[ -n "$STAMP" && -f "$SF_TRACE" ]] || SF_TRACE="$T_LOGS"
+if (( DRY )); then
+    echo "note: a real run would build $SF_SRC from $RUN_TABLE and $SF_TRACE" >&2
+else
+    rm -f "$SF_SRC"
+    if [[ -f "$SF_TRACE" && -f "$RUN_TABLE" ]]; then
+        echo "==> sample_failures.py -> $SF_SRC" >&2
+        "$BIN/sample_failures.py" --batch "$N" --run "$RUN" --table "$RUN_TABLE" --outdir "$OUTDIR" \
+            --trace "$SF_TRACE" --manifest "$T_MANI" --failed-log "$T_FAILED" --out "$SF_SRC" \
+            || { warn "sample_failures.py failed; archiving without sample_failures${N}.csv"; rm -f "$SF_SRC"; }
+    else
+        warn "no trace or input table for $RUN; archiving without sample_failures${N}.csv"
+    fi
+fi
+add "$SF_SRC" "sample_failures${N}.csv" 0
+
 # ------------------------------------------------------------------ report plan
 hsize() { local b="${1:-0}"; awk -v b="$b" 'BEGIN{s="B KB MB GB TB";split(s,u," ");
     i=1; while(b>=1024 && i<5){b/=1024;i++} printf "%.1f%s", b, u[i]}'; }
@@ -270,6 +294,11 @@ done
         printf '  %s\n' "${NOTES[@]}"
     fi
 } > "$DEST/manifest.txt"
+
+# The cross-run table, rebuilt from every run's file rather than appended to, so
+# re-archiving a run with --force cannot duplicate its rows.
+"$BIN/sample_failures.py" --combine "$DEST_ROOT" \
+    || warn "could not rebuild $DEST_ROOT/sample-failures.csv"
 
 echo >&2
 echo "archived $copied files to $DEST ($(du -sh "$DEST" | cut -f1))" >&2
