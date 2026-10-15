@@ -124,6 +124,14 @@ runs of one sample join in a single channel, so each sample produces exactly one
 and one aligner job. Species is deliberately *not* part of that grouping key — keying on it
 would split a sample into two STARsolo dirs that then collide in MAPPINGQC.
 
+**STARsolo resources travel in `meta.resources`.** `subworkflows/local/starsolo10x` calls
+`StarsoloResources.plan()` ([lib/StarsoloResources.groovy](lib/StarsoloResources.groovy)) once per
+sample: reads are estimated from the head of each R2 FASTQ, and per-attempt lists of memory,
+hours and queue come back; `configs/starsolo10x.config` only indexes them with `task.attempt - 1`
+and falls back to the old 128/256/384 GB ladder on `long` when `plan()` returned null. The
+coefficients are fitted in [notebooks/resource_prediction.ipynb](notebooks/resource_prediction.ipynb)
+(§10 prints them); refit there, don't hand-tune the class.
+
 **Species branching.** Samples resolve to `Homo sapiens` / `Mus musculus` / `UNKNOWN`; only
 the first two reach an aligner, the rest are logged and dropped. `--default_specie` supplies
 the fallback for missing or contradictory metadata; `--no_infer_specie` forces it everywhere.
@@ -181,6 +189,11 @@ node. Use `.claude/skills/reprocess-debug/bin/farm_run.sh --name <n> -- <cmd>` (
 wrapper; launch it with `run_in_background`), and keep the job's inputs and outputs off `/tmp`,
 which execution nodes cannot see. What counts as heavy: `reprocess-debug`'s
 `data-map.md §headnode`.
+
+**A config closure cannot see `lib/` classes** in Nextflow 26 (`No such variable:
+StarsoloResources`), while workflow code can. Anything computed by a `lib/` class has to be put
+into `meta` in the workflow and read from there by the directive — see `meta.resources`. Adding
+that key changed STARsolo's task hash, so a pre-2026-10 batch re-runs STARsolo on `-resume`.
 
 **`REPROCESS10X_BAM2FASTQ`'s stub is broken** — it touches `<id>.fastq.gz` but declares
 `path("fastqs/*")`, which blocks stub-testing any BAM-origin path.

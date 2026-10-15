@@ -11,6 +11,8 @@ Nextflow pipeline for loading and reprocessing public 10x datasets from GEO, SRA
 | `workflow/main.nf` | Core workflow: metadata fetch, download, and STARsolo alignment |
 | `subworkflows/` | Download and STARsolo alignment subworkflows |
 | `modules/` | Individual process modules |
+| `lib/StarsoloResources.groovy` | STARsolo memory, run limit and queue predicted from each sample's read count |
+| `notebooks/resource_prediction.ipynb` | Rerun/waste analysis and the fit behind `lib/StarsoloResources.groovy` |
 | `examples/datasets.tsv` | Example input file |
 | `examples/RESUME` | Example run script |
 | `nf-test.config` | nf-test configuration |
@@ -94,6 +96,15 @@ results/
 ├── versions.yml                    Software versions used by each process
 └── mapping_qc_stats.tsv            Per-sample STARsolo mapping QC statistics
 ```
+
+## STARsolo resources
+
+STARsolo's memory request, run limit and LSF queue are set per sample from its input read count,
+which is estimated before the task starts by reading the head of each R2 FASTQ
+([`lib/StarsoloResources.groovy`](lib/StarsoloResources.groovy)). Samples whose limit fits in 12 h
+go to `normal` (which backfills), the rest to `long`; each retry raises memory ×1.5 and time ×2.
+The coefficients come from [`notebooks/resource_prediction.ipynb`](notebooks/resource_prediction.ipynb),
+fitted on batches 9-21; refit there and paste the printed constants into the class.
 
 ## Species handling
 
