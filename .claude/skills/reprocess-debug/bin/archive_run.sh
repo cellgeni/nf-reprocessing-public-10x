@@ -96,6 +96,12 @@ BATCH_TABLE="data/tables/batches_deduplicated_sorted/batch${N}.csv"
 [[ -f "$BATCH_TABLE" ]] || BATCH_TABLE="data/tables/batches_deduplicated/batch${N}.csv"
 [[ -f "$BATCH_TABLE" ]] || BATCH_TABLE="data/tables/batches/batch${N}.csv"
 add "$BATCH_TABLE" "batch${N}.csv" 0
+# What this run was actually given. A rerun of part of a batch (batch24_left.csv) still
+# resolves to batch 24, so batch<N>.csv above is the whole batch, not this run's input.
+RUN_TABLE="$(cut -f7 <<<"$RR_ROW" | grep -oE -- '--datasets[= ]+[^ ]+' | head -1 \
+    | sed -E 's/^--datasets[= ]+//; s/^["'\'']//; s/["'\'']$//' || true)"
+[[ -n "$RUN_TABLE" && -f "$RUN_TABLE" ]] || RUN_TABLE="$BATCH_TABLE"
+[[ "$RUN_TABLE" != "$BATCH_TABLE" ]] && add "$RUN_TABLE" "$(basename "$RUN_TABLE")" 0
 
 # The output side of the run, and the only record of whether what succeeded was any
 # good. results/<outdir>/ is deleted after upload, so unarchived it is simply lost:
@@ -104,6 +110,13 @@ add "$BATCH_TABLE" "batch${N}.csv" 0
 # batch 9). See SKILL.md §4 and verify.md §qc.
 OUTDIR="results/batch${N}"
 add "${OUTDIR}/mapping_qc_stats.tsv" "mapping_qc_stats.tsv" 1
+# REPROCESS10X_COLLATE's other run tables and REPROCESS10X_RUNREPORT's MultiQC report
+# (runs from 2026-10 on; older runs simply lack them). The HTML is self-contained, so
+# multiqc_data/ is left behind.
+for t in datasets samples runs run_chemistry skipped_samples; do
+    add "${OUTDIR}/${t}.tsv" "${t}.tsv" 1
+done
+add "${OUTDIR}/multiqc/multiqc_report.html" "multiqc_report.html" 1
 
 # The run's own attribution table, concatenated. searchlist.tsv is per-batch and is
 # overwritten by the next run, so without this a re-triage years later cannot name a
