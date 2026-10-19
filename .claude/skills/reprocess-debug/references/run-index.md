@@ -14,11 +14,14 @@ for the account that published them.
 
 `.nextflow/history` is the authority on the first five columns; see `data-map.md §history`.
 
-> ### The work directories for batches 1-5 are gone
+> ### The work directories for batches 1-21 are gone
 >
-> Deleted, confirmed 2026-09-14. **The archive is the only surviving record for those runs**, and
-> no claim about them can be re-verified against a FASTQ any more — `verify.md §walkback` and
-> SKILL.md rule 3 ("measure, do not infer") apply only to batch 6 onward.
+> Batches 1-5 deleted, confirmed 2026-09-14; **batches 6-19 followed by 2026-10-02** — 0 of
+> their 818 failed-task work dirs remain — and batches 20-21's 134 were deleted later the same day.
+> **The archive is the only surviving record for those runs**, and no claim about them can be
+> re-verified against a FASTQ any more — `verify.md §walkback` and SKILL.md rule 3 ("measure,
+> do not infer") apply only to runs still on scratch. Check with the one-liner at the top of
+> `verify.md` before promising a measurement.
 >
 > Batch 4 shows what that costs. It was collected for the first time on 2026-09-14: the Nextflow
 > trace survived, so we know it had **47 failed tasks, 44 permanent** — but every one of the 47
@@ -31,25 +34,62 @@ for the account that published them.
 
 | Batch | Run | Started | NF status | Session | Failed | Permanent | Archive | Post-mortem |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `peaceful_feynman` | 2026-08-19 13:27 | OK | `9fd63dba` | — | — | `batch1/peaceful_feynman` | — |
+| 1 | `peaceful_feynman` | 2026-08-19 13:27 | OK | `9fd63dba` | 146 | 137 ‡‡ | `batch1/peaceful_feynman` | — |
 | 2 | `distraught_mercator` | 2026-08-21 15:13 | OK | `9fd63dba` | 294 | unknown † | `batch2/distraught_mercator` | — |
 | 3 | `big_keller` | 2026-08-25 18:24 | OK | `9fd63dba` | 73 in log † | 92 of 111 ‡ | `batch3/big_keller` | [Batch 3 Failure Triage](../../../../docs/post-mortems.md) |
 | 4 | `nauseous_spence` | 2026-09-01 14:55 | OK | `4645283e` | 47 | 44 | `batch4/nauseous_spence` | — (no stderr; see box above) |
 | 5 | `tender_brattain` | 2026-09-08 12:43 | OK | `f97ddf5e` | 48 | 48 ‡ | `batch5/tender_brattain` | [Batch 5 Reprocessing Post-Mortem](../../../../docs/post-mortems.md) |
 | 6 | `spontaneous_ampere` | 2026-09-08 23:25 | OK | `34653a63` | 16 | **7** | `batch6/spontaneous_ampere` | [Batch 6 Post-Mortem](../../../../docs/post-mortems.md) |
+| 7 | `elegant_lamarr` | 2026-09-14 16:20 | OK | `6d85067e` | 10 | **9** | `batch7/elegant_lamarr` (completed 2026-09-27; no `mapping_qc_stats.tsv` or `links.tsv` — `results/batch7/` was already gone) | [Batch 7 Post-Mortem](../../../../docs/post-mortems.md) |
+| 8 | `cheeky_cuvier` | 2026-09-15 12:14 | OK | `f5df7ff9` | 53 | **11** | `batch8/cheeky_cuvier` | [Batch 8 Post-Mortem](../../../../docs/post-mortems.md) |
+| 9 | `gigantic_hypatia` | 2026-09-16 22:40 | OK | `7721f85b` | 108 | **102** | `batch9/gigantic_hypatia` | [Batch 9 Post-Mortem](../../../../docs/post-mortems.md) |
+| 10 | `trusting_carson` | 2026-09-17 18:19 | OK | `3f474797` | 16 | **13** | `batch10/trusting_carson` | [Batch 10 Post-Mortem](../../../../docs/post-mortems.md) |
+| 11 | `irreverent_elion` | 2026-09-19 09:27 | OK | `f978cc32` | 22 | **8** | `batch11/irreverent_elion` | [Batch 11 Post-Mortem](../../../../docs/post-mortems.md) |
+| 12-13 | `boring_hawking` | 2026-09-20 22:31 | OK | `b77491b6` | 243 | **65** | `batch12-13/boring_hawking` | [Batch 12-13 Post-Mortem](../../../../docs/post-mortems.md) |
+| 18 | `compassionate_shaw` | 2026-09-27 20:07 | OK | `f48e8b4b` | 27 | **16** | `batch18/compassionate_shaw` (LSF job 400655) | [Batch 18-19 Post-Mortem](../../../../docs/post-mortems.md) |
+| 19 | `focused_goldberg` | 2026-09-27 20:07 | OK | `92249eb4` | 24 | **16** | `batch19/focused_goldberg` (LSF job 400662) | [Batch 18-19 Post-Mortem](../../../../docs/post-mortems.md) |
+| 20 | `sleepy_curie` | 2026-09-30 22:26 | OK | `81437f5c` | 104 | **94** | `batch20/sleepy_curie` (LSF job 978550) | [Batch 20-21 Post-Mortem](../../../../docs/post-mortems.md) |
+| 21 | `sick_galileo` | 2026-09-30 22:26 | OK | `9b47e66c` | 30 | **27** | `batch21/sick_galileo` (LSF job 978560) | [Batch 20-21 Post-Mortem](../../../../docs/post-mortems.md) |
+| 22 | `gloomy_church` | 2026-10-02 10:00 | OK | `1dee930b` | 73 | **29** | `batch22/gloomy_church` (LSF job 290127; first batch from `batches_deduplicated/`) | [Batch 22 Post-Mortem](../../../../docs/post-mortems.md) |
+| 23 | `exotic_dijkstra` | 2026-10-04 20:04 | OK | `950e9826` | 69 | **46** | `batch23/exotic_dijkstra` (LSF job 823507) | [Batch 23 Post-Mortem](../../../../docs/post-mortems.md) |
+| 24 | `infallible_sax` | 2026-10-07 09:00 | ERR | `15f523ff` | 150 | **121** | `batch24/infallible_sax` (LSF job 223884; killed by owner after 2d 23h; first batch from `batches_deduplicated_sorted/`) | [Batch 24 Post-Mortem](../../../../docs/post-mortems.md) |
+| 24 | `tender_torricelli` | 2026-10-10 08:14 | ERR | `15f523ff` | 138 | **126** | `batch24/tender_torricelli` (LSF job 741756; `-resume` of the above; group quota full from ~12:20, JVM crash 21:05; `debug/` holds the outage analysis). `disturbed_minsky` (LSF 741372, 08:10, 3 min, new session `42550d94`) was a false start in between and is not archived | [Batch 24 Post-Mortem](../../../../docs/post-mortems.md) |
+| 24 | `peaceful_aryabhata` | 2026-10-12 11:41 | ERR | `15f523ff` | 50 | **44** | `batch24/peaceful_aryabhata` (LSF job 965399; `-resume` with `batch24_left.csv`, the 288 samples the quota outage spoiled; killed by owner after 2d 21h with 4 STARsolo tasks running, none of which could have finished. COLLATE/RUNREPORT never ran, so no run tables; `debug/` holds the per-attempt STARsolo evidence and the run's concatenated `solo_qc`) | none yet |
+| 25 | `mighty_crick` | 2026-10-15 10:30 | ERR | `15f523ff` | 7,577 | **7,501** | `batch25/mighty_crick` (LSF job 718593; stopped 2026-10-17 03:33 by a driver-level `Disk quota exceeded`, 90 tasks killed, so no run tables or MultiQC; `debug/` holds the concatenated `solo_qc` and `links.tsv`). 7,210 of the permanent failures are PRJEB82511's plate-well runs | [Batch 25 Post-Mortem](../../../../docs/post-mortems.md) |
+| velocyto rerun | `stupefied_lavoisier` | 2026-10-16 09:45 | OK | `bdb696b5` | 6 | **6** | `batch_velocyto_rerun/stupefied_lavoisier` (LSF job 883936; `-resume` of `adoring_volta`, LSF 830110, 2026-10-15 23:47, killed by owner after STARsolo submission errors, LSF logs in `batch_velocyto_rerun/adoring_volta/`). 89 samples from earlier batches on `starsolo:v4.4`; archived with `--batch _velocyto_rerun`, so its files are `*_velocyto_rerun.*` | [Batch 25 Post-Mortem](../../../../docs/post-mortems.md) |
+| 25 velocyto todo | `nice_hopper` | 2026-10-17 20:36 | OK | `15f523ff` | 194 | **192** | `batch_velocyto_todo/nice_hopper` (LSF job 321884; `batch25_velocyto_todo.tsv`, 152 samples: batch 25's rerun group + the velocyto rerun's 4 empties; `-work-dir results/nf-work/batch25_velocyto_todo`, so the `-resume` cached nothing. Ran through the 2026-10-18/19 quota outage that killed `high_euclid` and `serene_bernard`: 4 silent empty matrices. Outdir is `results/batch25_velocyto_todo`, which `archive_run.sh` does not derive from `--batch`; archived through a temporary `results/batch_velocyto_todo` symlink. 6 hash-prefix dirs of the work dir were already gone at collection, 4 failed tasks' stderr with them) | none |
 
 **Every one of these is recorded `OK`.** `errorStrategy 'ignore'` keeps failed tasks out of the
 exit status, so the status column is not a verdict — batch 6 is `OK` with 7 permanent failures.
 
-† **`Permanent` is only meaningful where a `failures<N>.tsv` manifest exists, and only batch 6
-has one.** For the others `triage.py` was run over the `failed<N>.log` / `failedjobs<N>.tsv`
+† **`Permanent` is only meaningful where a `failures<N>.tsv` manifest exists — batches 4, 6, 7
+and 8.** For the others `triage.py` was run over the `failed<N>.log` / `failedjobs<N>.tsv`
 pair, which cannot know which tasks later succeeded on retry, so its `permanent` field equals
-its `total`. Do not quote those totals as permanent-failure counts.
+its `total`. Do not quote those totals as permanent-failure counts. (Batch 4's manifest is
+complete on counts and empty on reasons; see the box above.)
 
 ‡ From the analysis recorded in `known-issues.md §later`, which reconciled recovery properly.
 Batch 3's 111 failed tasks / 92 permanent comes from there; the 73 in the archived
 `triage3.json` is the number of blocks in `failed3.log`, which is smaller. Prefer the
 `known-issues.md` figures for batch 3 and 5.
+
+> **Batch 9 needed its attribution tables rebuilt.** `data/tables/searchlist.tsv` is per-batch and
+> is overwritten by whichever run wrote it last — on 2026-09-18 it still held batch 5/6 runs, so
+> `triage.py` left 91 of batch 9's 102 permanent failures `unresolved` and reported 3 datasets
+> instead of 8. The run's own metadata is the fix, and it is published per dataset:
+> `cat results/batch<N>/metadata/*/links.tsv` has the identical 5-column schema, and
+> `data/tables/batches/batch<N>.csv` supplies sample→dataset. Pass both:
+>
+> ```bash
+> cat results/batch9/metadata/*/links.tsv > /tmp/searchlist9.tsv
+> .claude/skills/reprocess-debug/bin/triage.py --manifest data/tables/failures9.tsv \
+>   --searchlist /tmp/searchlist9.tsv \
+>   --datasets data/tables/batches/batch9.csv data/tables/allhumandatasets.tsv data/tables/datasets.tsv
+> ```
+>
+> A high `unattributed` count is the tell; `triage.py` prints it and names the files it used.
+
+‡‡ Batch 1 was collected on 2026-09-27, after its work dirs were deleted: counts only, every reason is `(no .command.log found)`, and 118 of the 137 permanent failures are unattributed.
 
 ### Runs superseded by a resume
 
@@ -58,8 +98,8 @@ shows failures a later resume fixed, or hides them.
 
 | Batch | Superseded run | Started | Replaced by |
 |---|---|---|---|
-| 4 | `fervent_raman` (ERR) | 2026-08-26 10:41 | `nauseous_spence` — different session, so a fresh attempt rather than a resume |
-| 5 | `awesome_neumann` (ERR) | 2026-09-07 11:18 | `tender_brattain`, same session `f97ddf5e` |
+| 4 | `fervent_raman` (ERR) | 2026-08-26 10:41 | `nauseous_spence` — different session, so a fresh attempt rather than a resume. Its own Nextflow reports archived under `batch4/fervent_raman/` |
+| 5 | `awesome_neumann` (ERR) | 2026-09-07 11:18 | `tender_brattain`, same session `f97ddf5e`. Its own Nextflow reports archived under `batch5/awesome_neumann/` |
 
 ## Not batch runs
 

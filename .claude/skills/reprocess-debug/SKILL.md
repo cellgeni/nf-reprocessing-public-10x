@@ -3,11 +3,17 @@ name: reprocess-debug
 description: >
   Use when debugging a run of the nf-reprocessing-public-10x pipeline: collecting
   a finished run's logs, finding out what failed and why, classifying and
-  attributing failures to datasets, checking a chemistry-inference or SRA2FASTQ
-  claim against the persisted work dirs, or writing the post-mortem report.
+  attributing failures to datasets, screening a finished batch's outputs for
+  samples that aligned to nothing although no task failed, checking a
+  chemistry-inference or SRA2FASTQ claim against the persisted work dirs,
+  writing the post-mortem report, drafting a dated issue and suggested diff in
+  ./issues/ for a confirmed defect, or notifying the team by email/Slack with the
+  batch summary and project progress.
   Triggers on "triage/debug batch N", "what failed in the last run", a pasted
   Nextflow run name, an nf-work path, a "terminated with an error exit status"
-  line, or a request for a failure post-mortem.
+  line, "did anything come out wrong", a sample with cells but almost no
+  features, a request for a failure post-mortem, "draft an issue"/"file this",
+  or "send an update"/"email me"/"notify".
 ---
 
 # Debugging a reprocessing run
@@ -27,7 +33,7 @@ sending one to GEO/SRA/ENA.
 > and `scripts/run_reprocess.bsub` are referenced the same way — if you do not have them, the
 > surrounding instructions still stand but their commands will not run.
 
-Four rules override everything below.
+Five rules override everything below.
 
 1. **`attempt` is not diagnostic, and neither is a run's `OK` status.** The `errorStrategy` in
    `nextflow.config` retries every task exactly once whatever the exit code — **deliberately**,
@@ -44,12 +50,30 @@ Four rules override everything below.
 3. **Measure, do not infer — where you still can.** Several confident log-based conclusions were
    wrong until checked against the FASTQs, because a failure routinely surfaces two stages
    downstream of its cause wearing an unrelated message. See `verify.md §walkback`. **But the
-   work dirs for batches 1-5 were deleted (confirmed 2026-09-14)**, so walk-back works only from
-   batch 6 onward; for earlier runs the archive under `/nfs/cellgeni/reprocessing-runs/` is the
-   whole of the surviving evidence. Check the dir exists before promising to verify anything.
-4. **Mind the sizes.** The Bash tool timeout is 120 s; `data/tables/failed2.log` is 793 MB;
-   `.nextflow.log` is 35 MB; `find` across `nf-work/` or `/` does not return. Long collections
-   go in the background and get polled. Details in `data-map.md §sizes`.
+   work dirs for batches 1-5 were deleted (confirmed 2026-09-14), and those for batches 6-21 by
+   2026-10-02 (0 of 952 failed-task dirs left)**, so walk-back works only on runs still on
+   scratch; for the rest the archive under `/nfs/cellgeni/reprocessing-runs/` is the whole of the
+   surviving evidence. Check the dir exists before promising to verify anything.
+4. **Mind the sizes, and run anything heavy on LSF, not on the head node.** The Bash tool
+   timeout is 120 s; `data/tables/failed2.log` is 793 MB; `.nextflow.log` is 35 MB; `find`
+   across `nf-work/` or `/` does not return. The head nodes are for editing, LSF and light
+   reads, and Arbiter enforces it: on 2026-10-07 the batch-23 session's full-file FASTQ scans,
+   `gzip -t` and a python pass over 218 matrices averaged ~3.5 cores on `farm22-head2` and put
+   ab76 in `penalty1`. **Running it in the background does not move it off the head node.**
+   Anything that reads a FASTQ past its head, decompresses or checksums a whole file, loops over
+   many work dirs or matrices, or would take more than about a CPU-minute goes through
+   `bin/farm_run.sh` (a `bsub -K` wrapper), itself launched with `run_in_background: true`.
+   The line between light and heavy is in `data-map.md §sizes`.
+5. **A task that completed is not an output that is good, and a sample that never ran leaves no
+   trace at all.** Batch 9 published 38 near-empty matrices, batch 10 published 75 and batch 11
+   published 144 — 4.8%, 10.0% and **17.1%** of everything they aligned — non-GEX libraries
+   accepted as GEX, with not one task failing. Batch 11 had the cleanest failure list of any
+   batch (8 permanent, no dataset lost) and the worst outputs, so the two are not correlated. Batch 10 also lost 6 samples inside `FETCH10XMETA`, which exited 0, and pooled
+   four experimental conditions into one published matrix that looks entirely healthy. The
+   failure list shows none of this and `triage.py` never sees it. Screen the successes (§4)
+   before concluding anything about a batch, and do it **while `results/<outdir>/` still
+   exists** — it is deleted after upload, and with it the only record of whether the outputs
+   were any good.
 
 ## 1. Route
 
@@ -57,8 +81,11 @@ Four rules override everything below.
 |---|---|---|
 | **collect** | `data-map.md` | a run finished and has no `failures<N>.tsv` yet |
 | **classify** | `classify.md` | you have the artifacts and want the shape of the failure set |
+| **screen** | `verify.md §qc` | you have the failure picture and now need to know whether what *succeeded* is any good |
 | **verify** | `verify.md` | before believing any claim about read structure, chemistry or a guard |
 | **report** | `report.md` | the answer is going to a person, not just the terminal |
+| **file** | `issues.md` | a finding is a confirmed, actionable defect — draft it for the tracker |
+| **notify** | `notify.md` | a debug session is finished — save the LSF log, refresh the progress counter, email/Slack the team (`--team`) |
 | **compare** | `known-issues.md` | is this run's profile normal, and is this bug already known |
 | **look up** | `run-index.md` | which run was batch N, where is its evidence archived, is there a post-mortem — and `docs/post-mortems.md` for its link |
 
@@ -66,13 +93,18 @@ Four rules override everything below.
 |---|---|
 | "where is the batch-N post-mortem", "send me the link" | `docs/post-mortems.md` — do not go listing artifacts |
 | "which run was batch N", "where is its evidence" | `run-index.md` |
-| "triage batch N", "what failed in the last run" | §2, then §3 |
+| "triage batch N", "what failed in the last run" | §2, §3, then §4 |
+| "did anything come out wrong", a batch with few or no failures | `verify.md §qc` |
+| a sample with a plausible cell count but almost no features | `verify.md §qc` |
 | a run name (`spontaneous_ampere`) or an LSF job id | `data-map.md §history` |
 | an `nf-work/<hh>/<hash>` path | `verify.md §walkback` |
 | `terminated with an error exit status (N)` | `classify.md §exits` |
 | a run still in flight | `classify.md §console` |
 | "why was this sample rejected", a chemistry argument | `verify.md §whitelist`, then `docs/10x_chemistry_reference.md` |
 | "write it up", "post-mortem", "share the findings" | `report.md` |
+| "file this", "draft an issue", "open a ticket", a confirmed defect worth fixing | `issues.md` |
+| "email me", "notify ab76", "send an update", "post to slack" | `notify.md` |
+| "who gets the emails", "X isn't getting the reports" | `notify.md` — recipients are `notify.py`'s `TEAM` |
 
 Not covered: fixing the aligners, the reference/whitelist layout, batching strategy beyond
 `data-map.md §batches`, and anything about delivery or iRODS. Say so rather than guessing.
@@ -87,8 +119,17 @@ Resolves batch → run name via `.nextflow/history`, exports the 36-field trace,
 last failed attempt per task, and writes four files into `data/tables/`:
 `runlogs<N>.tsv`, `failedjobs<N>.tsv`, `failed<N>.log`, `failures<N>.tsv`.
 
-**Run it in the background** — `nohup … &` or `run_in_background: true`. It reads a work dir per
-failed task, and a 1800-failure run will not finish inside the tool timeout.
+**Run it on LSF, in the background.** It runs `nextflow log` (a JVM) over the whole trace and
+reads a work dir per failed task, and a 1800-failure run will not finish inside the tool
+timeout. Submit it through the wrapper, with `run_in_background: true`:
+
+```bash
+.claude/skills/reprocess-debug/bin/farm_run.sh --name collect23 --mem 8G -- \
+  .claude/skills/reprocess-debug/bin/collect_run_logs.sh --batch 23
+```
+
+`triage.py`, the §4 screens over `mapping_qc_stats.tsv` and `links.tsv`, and reading a handful of
+work dirs are light and fine on the head node.
 
 Three things it does that hand-collection got wrong, and that you should not undo:
 
@@ -132,14 +173,100 @@ cover, give it a `VERDICT` entry in the same change, and re-run the batch-3 regr
 `verify.md §regression` — the rule set is first-match-wins, so a new pattern can silently steal
 rows from an old one.
 
-## 4. Verify before you conclude
+## 4. Screen what succeeded
+
+The failure list says nothing about the samples that aligned, nor about the ones that never
+reached a task. Each of the last three batches had its largest finding here: 38 samples in
+batch 9, **75 in batch 10** and **144 in batch 11** — hashing, antibody, CMO, guide-RNA and
+V(D)J libraries accepted as GEX, plus an entire 97-sample bulk amplicon dataset that is not 10x
+at all — plus, in batch 10, 6 samples dropped by the metadata stage without a word. None of it
+appears in any failure list. Batch 11 is the case to remember: 8 permanent failures, no dataset
+lost, and 17.1% of everything it published was not gene expression.
+
+```bash
+# what aligned to nothing. De-duplicate on Sample first — duplicate dataset rows inflate this.
+awk -F'\t' 'NR>1 && !seen[$2]++ && $17+0 < 0.05 && $8+0 < 100 {print $1, $2, $14, $17, $8}' \
+    results/batch10/mapping_qc_stats.tsv
+
+# what never got as far as a task: requested samples missing from the run's own links.tsv
+python3 - <<'EOF'
+import csv, os
+B = "10"
+# batch24+ live in batches_deduplicated_sorted/, batch22-23 in batches_deduplicated/;
+# the superseded dedup batch24-35 and never-run batches/batch22-49 share the names
+bt = next(p for p in (f"data/tables/batches_deduplicated_sorted/batch{B}.csv",
+                      f"data/tables/batches_deduplicated/batch{B}.csv",
+                      f"data/tables/batches/batch{B}.csv") if os.path.exists(p))
+for r in csv.DictReader(open(bt), delimiter="\t"):
+    ds  = r["dataset_id"]
+    req = {s.strip() for s in r["sample_id"].split(",") if s.strip()}
+    p   = f"results/batch{B}/metadata/{ds}/links.tsv"
+    if not os.path.exists(p):
+        print(f"{ds}: no links.tsv at all ({len(req)} samples)"); continue
+    seen = {l.split("\t")[4].strip() for l in open(p) if len(l.split("\t")) >= 5}
+    if req - seen:
+        print(f"{ds}: {len(req & seen)}/{len(req)} emitted, missing {sorted(req - seen)}")
+EOF
+```
+
+**Both terms of the first screen are load-bearing.** `exon_u < 0.05` alone called a
+single-nucleus sample junk in batch 10 — `GSM6729514`, `exon_u` 0.043 but 583 median features
+and `full_u` 0.47. `Med_nFeature < 100` removes exactly that and nothing else. Do **not** reach
+for `full_u` as the second term: it would clear 7 of batch 9's confirmed hashing libraries, which
+reach `full_u` 0.38 on 1-5 features. Both numbers are screening values from three batches, not
+verdicts — read `verify.md §qc` before acting on a hit.
+
+**The first screen is precise and not sensitive — run the title scan too.** It has never
+produced a false positive, but it only finds libraries that map to *nothing*, and that is not
+the whole population. In batch 11 it flagged 42 of a measured 144 non-GEX samples. It missed
+23 V(D)J (TCR) libraries that map at 73-90% with up to 246 median features, and 79 of the 97
+samples of a bulk amplicon dataset that maps exonically at 0.05-0.24. Do not read a small
+first-screen result as a clean batch.
+
+```bash
+# The libraries GEO names in the title. Zero false positives in batch 11 (47 of 844),
+# where the first screen found 42 of 144. Token-delimited on purpose: a substring match
+# also pulls in Ascites_IG_1, "scRNA CRISPRa ... S1" and "spike-specific B cells", all
+# healthy GEX.
+for f in results/batch11/metadata/*/*_family.soft; do
+  awk -v d="$(basename "$(dirname "$f")")" \
+      '/^\^SAMPLE = /{g=$3} /^!Sample_title/{sub(/^!Sample_title = /,""); print d"\t"g"\t"$0}' "$f"
+done | grep -Ei '(^|[[:space:]_-])(TCR|BCR|VDJ|CITE|HTO|ADT|CSP|CMO|hashtag|hashing|gRNA|sgRNA)([[:space:]_-]|$)|	BC[0-9]+$'
+```
+
+Confirm a hit before calling it: the matrix itself is decisive. A V(D)J library's top genes are
+`TRBV`/`TRAV` (or `IGHV`) segments — count UMIs per gene in
+`starsolo/<GSE>/<GSM>/output/Gene/filtered` rather than arguing from the title alone. One or
+two matrices are fine on the head node; a whole hold list's worth (batch 23 checked 218) is a
+`bin/farm_run.sh` job, with the helper script on Lustre (`logs/lsf/debug/`), not in `/tmp`.
+
+`Med_nFeature < 100` on its own catches 131 of batch 11's 144 with one false positive, but it is
+**not** a safe replacement for the conjunction: on batch 10 it adds 28 samples of which at least
+27 are real shallow libraries (GSE219098 ×22 at `exon_u` 0.53). Use it as a review flag.
+
+**The second screen catches a different failure entirely**, and it is the one with no other
+symptom: batch 10's `FETCH10XMETA` emitted 2 of GSE218936's 8 requested samples, exited 0, and
+aligned the survivor against all four runs of its group — publishing four experimental conditions
+pooled under one sample's name, at 96% mapping and 1865 median features. Nothing about that
+output looks wrong. Batch 9 is clean on this check; batches 1-8 cannot be checked.
+
+Two operational traps:
+
+- **De-duplicate before counting.** `mapping_qc_stats.tsv` carries one row per dataset unit, not
+  per sample, so duplicate dataset accessions double-count — batch 9, 917 rows for 784 samples;
+  batch 10, 973 for 748. Batch 10's 75 flagged samples first appear as 97 rows.
+- **Do this before the batch is cleaned up.** `results/<outdir>/` is deleted after upload; only
+  batches 9 and 10 still had one in September 2026. `archive_run.sh` (§10) preserves
+  `mapping_qc_stats.tsv` and the run's `links.tsv`, but only if it runs first.
+
+## 5. Verify before you conclude
 
 Anything you are about to state as fact about read geometry, barcode match rate, chemistry, or
 which stage really caused a failure: measure it. `verify.md` has the whitelist probe, the
 staged-symlink walk-back, how to run the inference script directly against a work dir, and the
 regression accessions to re-check after touching inference.
 
-## 5. Report
+## 6. Report
 
 If the answer is going to a person, it goes out as an Artifact, not as scrollback. `report.md`
 has the procedure, the house palette and layout, the three-state theme trap, and the
@@ -147,18 +274,74 @@ reconciliation checks to run before publishing. Load the `artifact-design` skill
 
 Relay the headline findings in the chat reply as well as linking the page.
 
-## 6. Files
+## 7. Draft an issue for every confirmed defect
+
+Not conditional on writing a report — a session with no post-mortem still drafts one of these
+for any finding that is a real, actionable bug rather than a correct rejection. `issues.md` has
+the trigger condition, the naming (dated, since sessions stack up between reviews), the issue
+template, and the safe procedure for generating a real `git diff` without leaving the working
+tree modified.
+
+**Never run `gh issue create` or apply the suggested diff yourself.** Both files are drafts for
+the user to review; say so plainly in the chat reply, with the paths.
+
+## 8. Save the LSF log and notify
+
+Closing step for every debug session, whether or not it produced a report or an issue draft.
+`notify.md` has the three parts:
+
+```bash
+.claude/skills/reprocess-debug/bin/save_lsf_log.sh --batch 7          # onto NFS now, don't wait for §10
+.claude/skills/reprocess-debug/bin/track_progress.py --batch 7 --run elegant_lamarr --json /tmp/progress.json
+.claude/skills/reprocess-debug/bin/notify.py --team --subject "..." --body-file /tmp/body.txt --slack
+```
+
+Email always sends (`smtplib.SMTP("localhost")`, no credentials needed). **Use `--team`, not a
+hand-typed `--to`** — it expands to `notify.py`'s `TEAM` list, the one place the recipients are
+defined; a hand-typed address is how ap41 silently got nothing for batches 6-9. Slack only sends if
+`SLACK_BOT_TOKEN`/`CHANNEL_ID` resolve to something real — **never go looking for that token
+yourself or fabricate one**; if it's not configured, say so and send the email anyway. Its
+`slack_sdk` dependency is borrowed per-call through `uvx`, because this python has user
+site-packages disabled and `pip install --user` therefore installs something unimportable — see
+`notify.md`. Report what `notify.py`'s stderr actually says; "posted to channel" is the only line
+that means it went out.
+
+**Read `notify.md §2` about the progress percentage before quoting it anywhere.** Since
+2026-10-02 its denominator is the deduplicated to-do list, `data/tables/batches_deduplicated/`
+(batch22-35, 24,864 samples), not the March 2026 project-wide target. It started at 0% and
+counts how much of what was left is done. It is not comparable with rows before 2026-10-02,
+which were measured against 44,494 samples.
+
+**Batch24 onward run from `data/tables/batches_deduplicated_sorted/` (batch24-32, the
+last).** On 2026-10-06 `scripts/sort_batches_by_size.py --reads-only-from 28` re-packed the
+never-run dedup batch24-35 so that the datasets with the most reads per sample go first.
+Batches 24-27 close at 1842 samples or 1 T reads, whichever comes first. Batches 28-32
+carry about 930 G reads each with no sample cap, so they grow from 1745 to 7506 samples.
+The sample set is identical, so the progress denominator above is unchanged. The dedup
+`batch24-35.csv` stay on disk but are superseded; never read a batch-24+ table from there,
+and there is no batch33 or later to run. `dataset_sizes.tsv` beside the batches ranks every
+dataset by size, and `run_reads.tsv` records each run's read count and where it came from.
+
+## 9. Files
 
 | Path | What |
 |---|---|
+| `bin/farm_run.sh` | run one heavy measurement on LSF (`bsub -K`) instead of the head node; prints its output, returns its exit status. See `data-map.md §headnode` |
 | `bin/collect_run_logs.sh` | run/batch → `runlogs`, `failedjobs`, `failed.log`, `failures` manifest |
 | `bin/triage.py` | manifest → classified, attributed, verdicts, `--json <path>` |
 | `bin/archive_run.sh` | a finished run → a complete record under `/nfs/cellgeni/reprocessing-runs/` |
+| `bin/sample_failures.py` | run → `sample_failures<N>.csv`, one row per requested sample without a usable output (is10x, modality, failedgroup rerun/terminate/review, reason, comments); `--combine` rebuilds `/nfs/cellgeni/reprocessing-runs/sample-failures.csv`. Called by `archive_run.sh` |
 | `bin/resolve_run.sh` | sourced helper: batch → run name, LSF job id, report stamp |
+| `bin/save_lsf_log.sh` | copies a run's LSF driver log to NFS immediately, ahead of the full archive |
+| `bin/track_progress.py` | progress vs. the deduplicated to-do list (`data/tables/batches_deduplicated/`) — iRODS + local results, appends to `progress-counter.tsv` |
+| `bin/notify.py` | email (`--team`, or `--to` for a one-off address) + Slack (if configured) — never fabricates a missing credential; `TEAM` is the recipient list |
+| `bin/notify_run_done.sh` | the unattended "run finished, N left on Lustre" Slack ping, called from `scripts/run_reprocess.bsub` — not part of a debug session |
 | `references/data-map.md` | where everything lives, schemas, naming, size traps, batching |
 | `references/classify.md` | rule semantics, exit codes, attribution joins, live-run triage |
-| `references/verify.md` | work-dir probes, guards and thresholds, regression accessions |
+| `references/verify.md` | work-dir probes, guards and thresholds, regression accessions — and `§qc`, screening a finished batch's outputs for samples that aligned to nothing |
 | `references/report.md` | the Artifact post-mortem |
+| `references/issues.md` | drafting a dated issue + suggested diff in `./issues/` for a confirmed defect |
+| `references/notify.md` | saving the LSF log, refreshing the progress counter, emailing/Slacking the team |
 | `references/known-issues.md` | baseline distributions, per-batch history, open bugs |
 | `references/run-index.md` | every run: name, session, failure counts, archive path |
 
@@ -168,7 +351,7 @@ layouts must be rejected), `archive-pathologies.md`, `reporting-upstream.md`,
 `failure-modes.md`, and `post-mortems.md` — the index of record for every published report's
 link, the one place to read a URL from or write a new one to.
 
-## 7. Archive the run when you are done
+## 10. Archive the run when you are done
 
 ```bash
 .claude/skills/reprocess-debug/bin/archive_run.sh --batch 6 --dry-run   # always first
@@ -182,3 +365,13 @@ thing standing between you and an unverifiable claim.
 
 Nothing is skipped silently; a missing or oversized file is recorded in `manifest.txt`. Then add
 the run to `references/run-index.md`.
+
+It also builds `sample_failures<N>.csv` (`bin/sample_failures.py`): every requested sample
+without a usable output, with why and whether to rerun or terminate it. It covers task failures,
+unfinished tasks, samples FETCH10XMETA never emitted, species skips, and the silent outputs
+(STARsolo exit 0 with an empty Gene matrix, or a non-GEX library). After writing the archive it
+rebuilds the cross-run `/nfs/cellgeni/reprocessing-runs/sample-failures.csv`. **Archive before
+`results/` and `nf-work` are cleaned.** The output check reads the published STARsolo
+`Summary.csv` files and the work dirs supply `chemistry.json` evidence; once both are gone, only
+the stderr in `failed<N>.log` is left to classify from. `data-map.md §sample-failures` has the
+columns and vocabulary.

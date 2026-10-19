@@ -1,0 +1,17 @@
+plugins {
+    id 'io.nextflow.nextflow-plugin' version '1.0.0-beta.15'
+}
+
+version = '0.1.0'
+
+nextflowPlugin {
+    // The pipeline requires >=26.04.1; compile against the oldest release it accepts.
+    nextflowVersion = '26.04.1'
+
+    provider = 'cellgeni'
+    className = 'cellgeni.lineagekeep.LineageKeepPlugin'
+    extensionPoints = [
+        'cellgeni.lineagekeep.LineageKeepConfig',
+        'cellgeni.lineagekeep.LineageKeepFactory'
+    ]
+}

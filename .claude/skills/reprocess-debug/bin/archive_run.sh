@@ -89,7 +89,64 @@ add "$T_FAILED" "failed${N}.log"      1
 add "$T_MANI"   "failures${N}.tsv"    0
 add "$T_JOBS"   "failedjobs${N}.tsv"  0
 add "$T_LOGS"   "runlogs${N}.tsv"     1
-add "data/tables/batches/batch${N}.csv" "batch${N}.csv" 0
+# batch22 onward were built into batches_deduplicated/, and batch24 onward re-packed
+# biggest-first into batches_deduplicated_sorted/ (scripts/sort_batches_by_size.py).
+# All three dirs share names, so the first that exists wins.
+BATCH_TABLE="data/tables/batches_deduplicated_sorted/batch${N}.csv"
+[[ -f "$BATCH_TABLE" ]] || BATCH_TABLE="data/tables/batches_deduplicated/batch${N}.csv"
+[[ -f "$BATCH_TABLE" ]] || BATCH_TABLE="data/tables/batches/batch${N}.csv"
+add "$BATCH_TABLE" "batch${N}.csv" 0
+# What this run was actually given. A rerun of part of a batch (batch24_left.csv) still
+# resolves to batch 24, so batch<N>.csv above is the whole batch, not this run's input.
+RUN_TABLE="$(cut -f7 <<<"$RR_ROW" | grep -oE -- '--datasets[= ]+[^ ]+' | head -1 \
+    | sed -E 's/^--datasets[= ]+//; s/^["'\'']//; s/["'\'']$//' || true)"
+[[ -n "$RUN_TABLE" && -f "$RUN_TABLE" ]] || RUN_TABLE="$BATCH_TABLE"
+[[ "$RUN_TABLE" != "$BATCH_TABLE" ]] && add "$RUN_TABLE" "$(basename "$RUN_TABLE")" 0
+
+# The output side of the run, and the only record of whether what succeeded was any
+# good. results/<outdir>/ is deleted after upload, so unarchived it is simply lost:
+# batch 9 published 38 near-empty matrices with no task failing, and for batches 1-8
+# that evidence no longer exists anywhere. Both files are small (140KB and 377KB for
+# batch 9). See SKILL.md §4 and verify.md §qc.
+# The run's own --outdir, read from its command line like --datasets above; results/batch<N>
+# only when the command names none (or it no longer exists).
+OUTDIR="$(cut -f7 <<<"$RR_ROW" | grep -oE -- '--outdir[= ]+[^ ]+' | head -1 \
+    | sed -E 's/^--outdir[= ]+//; s/^["'\'']//; s/["'\'']$//; s:/+$::' || true)"
+[[ -n "$OUTDIR" && -d "$OUTDIR" ]] || OUTDIR="results/batch${N}"
+add "${OUTDIR}/mapping_qc_stats.tsv" "mapping_qc_stats.tsv" 1
+# REPROCESS10X_COLLATE's other run tables and REPROCESS10X_RUNREPORT's MultiQC report
+# (runs from 2026-10 on; older runs simply lack them). The HTML is self-contained, so
+# multiqc_data/ is left behind.
+for t in datasets samples runs run_chemistry skipped_samples; do
+    add "${OUTDIR}/${t}.tsv" "${t}.tsv" 1
+done
+add "${OUTDIR}/multiqc/multiqc_report.html" "multiqc_report.html" 1
+
+# The run's own attribution table, concatenated. searchlist.tsv is per-batch and is
+# overwritten by the next run, so without this a re-triage years later cannot name a
+# single dataset — which is already true of batch 8 (see classify.md §attribution).
+# Built here the same way triage<N>.json is, below.
+# Keyed by run and rebuilt on every real invocation: a batch archived twice (a failed run,
+# then a -resume of part of it) must not carry the first run's table into the second's
+# archive. The old per-batch links<N>.tsv is used only when this run's metadata is gone.
+LINKS_SRC="data/tables/links${N}.${RUN}.tsv"
+if (( DRY == 0 )) && compgen -G "${OUTDIR}/metadata/*/links.tsv" >/dev/null; then
+    echo "==> concatenating ${OUTDIR}/metadata/*/links.tsv -> $LINKS_SRC" >&2
+    cat "${OUTDIR}"/metadata/*/links.tsv > "$LINKS_SRC" \
+        || warn "could not build $LINKS_SRC; archiving without it"
+elif [[ ! -s "$LINKS_SRC" && -s "data/tables/links${N}.tsv" ]]; then
+    warn "no ${OUTDIR}/metadata/*/links.tsv; falling back to data/tables/links${N}.tsv, which may be another run's"
+    LINKS_SRC="data/tables/links${N}.tsv"
+fi
+if [[ -s "$LINKS_SRC" ]]; then
+    add "$LINKS_SRC" "links${N}.tsv" 1
+elif (( DRY )) && compgen -G "${OUTDIR}/metadata/*/links.tsv" >/dev/null; then
+    # Not built under --dry-run (same as triage<N>.json), so it cannot go in the
+    # plan — say so rather than letting the preview imply it will be skipped.
+    echo "note: a real run would concatenate $(compgen -G "${OUTDIR}/metadata/*/links.tsv" | wc -l)" \
+         "links.tsv into $LINKS_SRC and archive it as links${N}.tsv" >&2
+fi
+
 if [[ -n "$STAMP" ]]; then
     for kind in report timeline; do
         add "reports/execution_${kind}_${STAMP}.html" "execution_${kind}_${STAMP}.html" 1
@@ -115,7 +172,7 @@ PM_INDEX="$REPO/docs/post-mortems.md"
 PM_URL=""
 if [[ -f "$PM_INDEX" ]]; then
     PM_URL="$(grep -F "$RUN" "$PM_INDEX" 2>/dev/null \
-        | grep -o 'https://claude\.ai/code/artifact/[0-9a-f-]\{36\}' | head -1 || true)"
+        | grep -oE 'https://claude\.ai/(code/artifact/[0-9a-f-]{36}|artifact/[A-Za-z0-9]+)' | head -1 || true)"
 fi
 
 # triage json: generate next to the manifest if it is not there already
@@ -137,6 +194,30 @@ if [[ ! -s "$TRIAGE_SRC" && $DRY -eq 0 ]]; then
 fi
 # -s not -f: a failed run above leaves a zero-byte file, which is worse than none
 [[ -s "$TRIAGE_SRC" ]] && add "$TRIAGE_SRC" "triage${N}.json" 0
+
+# Per-sample failure table: one row per requested sample without a usable output,
+# with is10x / modality / failedgroup / reason / comments (sample_failures.py).
+# Always rebuilt, never reused: a run and its -resume share N, so a file left by the
+# other run would describe the wrong run. Built from the run's own input table, and
+# while results/ and nf-work still exist — afterwards only the stderr in
+# failed<N>.log is left to classify from, and the output check has nothing to read.
+SF_SRC="data/tables/sample_failures${N}.csv"
+SF_TRACE="reports/execution_trace_${STAMP}.txt"
+[[ -n "$STAMP" && -f "$SF_TRACE" ]] || SF_TRACE="$T_LOGS"
+if (( DRY )); then
+    echo "note: a real run would build $SF_SRC from $RUN_TABLE and $SF_TRACE" >&2
+else
+    rm -f "$SF_SRC"
+    if [[ -f "$SF_TRACE" && -f "$RUN_TABLE" ]]; then
+        echo "==> sample_failures.py -> $SF_SRC" >&2
+        "$BIN/sample_failures.py" --batch "$N" --run "$RUN" --table "$RUN_TABLE" --outdir "$OUTDIR" \
+            --trace "$SF_TRACE" --manifest "$T_MANI" --failed-log "$T_FAILED" --out "$SF_SRC" \
+            || { warn "sample_failures.py failed; archiving without sample_failures${N}.csv"; rm -f "$SF_SRC"; }
+    else
+        warn "no trace or input table for $RUN; archiving without sample_failures${N}.csv"
+    fi
+fi
+add "$SF_SRC" "sample_failures${N}.csv" 0
 
 # ------------------------------------------------------------------ report plan
 hsize() { local b="${1:-0}"; awk -v b="$b" 'BEGIN{s="B KB MB GB TB";split(s,u," ");
@@ -223,6 +304,11 @@ done
         printf '  %s\n' "${NOTES[@]}"
     fi
 } > "$DEST/manifest.txt"
+
+# The cross-run table, rebuilt from every run's file rather than appended to, so
+# re-archiving a run with --force cannot duplicate its rows.
+"$BIN/sample_failures.py" --combine "$DEST_ROOT" \
+    || warn "could not rebuild $DEST_ROOT/sample-failures.csv"
 
 echo >&2
 echo "archived $copied files to $DEST ($(du -sh "$DEST" | cut -f1))" >&2

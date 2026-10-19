@@ -14,13 +14,18 @@ wins and is taken from that script; changing the order changes the counts, so
 treat the categories as a triage aid, not a taxonomy. If a count matters, read
 the blocks.
 """
-import argparse, collections, csv, json, os, re, sys
+import argparse, collections, csv, glob, json, os, re, sys
 
 # --------------------------------------------------------------------- rules
 # First match wins. Most specific first.
 RULES = [
+    # First because a full disk breaks whatever happened to be writing (pigz, wget,
+    # STAR's .exitcode), and the tool's own message after it would mislead. Batch 24.
+    ("disk-quota",             r"Disk quota exceeded|No space left on device"),
     ("meta-no-run-id",         r"No experiment or run ID found for"),
+    ("meta-soft-download",     r"Failed to download \S+_family\.soft"),
     ("read-counts-differ",     r"Read counts differ across selected run FASTQs"),
+    ("chem-atac-only",         r"Detected ATAC-only 10x run"),
     ("chem-no-whitelist-hit",  r"No supported 10x run layout .*\(no whitelist hits\)"),
     ("chem-no-whitelist-rand", r"No whitelist matched .* random barcodes"),
     ("chem-ambiguous-layout",  r"No supported 10x run layout"),
@@ -40,6 +45,8 @@ RULES = [
     ("wget-http-error",        r"ERROR 40[0-9]|ERROR 50[0-9]"),
     ("star-sj-buffer",         r"buffer size for SJ output is too small"),
     ("star-segfault",          r"Segmentation fault"),
+    ("star-input-unreadable",  r"R1 length \(-2147483647\)"),
+    ("lustre-io-error",        r"transport endpoint shutdown|\[Errno (5|108)\]|\(Input/output error\)"),
     ("lsf-memlimit",           r"TERM_MEMLIMIT"),
     ("lsf-runlimit",           r"TERM_RUNLIMIT"),
     ("star-fatal-other",       r"EXITING because of fatal error"),
@@ -48,7 +55,10 @@ RULES = [
 
 # verdict, and the one-line reason it gets that verdict
 VERDICT = {
+    "disk-quota":             ("infrastructure",    "group quota or disk full; free space and rerun"),
+    "chem-atac-only":         ("correct-rejection", "ATAC library; must not be aligned as GEX"),
     "meta-no-run-id":         ("investigate",       "GEO sample with no SRA experiment/run — metadata gap upstream"),
+    "meta-soft-download":     ("infrastructure",    "GEO SOFT fetch failed; whole series lost. 403 = transient refusal (batch 23), 404 = no such series"),
     "read-counts-differ":     ("pipeline-bug",      "ENA _1/_2/unsuffixed mix; wrong file set selected"),
     "chem-no-whitelist-hit":  ("investigate",       "no whitelist hit at all — check the window, not the head"),
     "chem-no-whitelist-rand": ("pipeline-bug",      "starsolo re-detect disagreeing with run-level inference"),
@@ -69,12 +79,60 @@ VERDICT = {
     "wget-http-error":        ("infrastructure",    "HTTP 4xx/5xx — often transient, do not blacklist"),
     "star-sj-buffer":         ("pipeline-bug",      "raise --limitOutSJcollapsed; retries cannot help"),
     "star-segfault":          ("investigate",       "STAR SIGSEGV — check the reference and the read geometry"),
+    "star-input-unreadable":  ("infrastructure",    "R1 unreadable when STARsolo started (partial staging, Lustre eviction); rerun"),
+    "lustre-io-error":        ("infrastructure",    "Lustre I/O error or client eviction on the node; rerun"),
     "lsf-memlimit":           ("infrastructure",    "LSF killed the job, not a signal from the tool"),
     "lsf-runlimit":           ("infrastructure",    "LSF wall-clock kill"),
     "star-fatal-other":       ("investigate",       "STAR fatal error, read the block"),
     "no-error-captured":      ("evidence-lost",     "no stderr captured — nf-work cleaned?"),
     "UNCLASSIFIED":           ("investigate",       "read the block in full"),
 }
+
+# What a category means for the sample it blocks, as bin/sample_failures.py reports
+# it: reason, failedgroup (rerun / terminate / review), modality, is10x, and a caveat
+# for the comment where the mapping is known to be wrong some of the time. Keep it
+# in step with RULES and VERDICT: every category needs an entry.
+SAMPLE_REASON = {
+    "disk-quota":             ("infrastructure", "rerun", "unknown", "unknown", ""),
+    "chem-atac-only":         ("unsupported modality", "terminate", "atac", "yes", ""),
+    "meta-no-run-id":         ("no link available", "terminate", "unknown", "unknown",
+                               "GEO sample with no SRA/ENA run behind it"),
+    "meta-soft-download":     ("infrastructure", "rerun", "unknown", "unknown",
+                               "GEO refused or lost the SOFT file; a 404 means the series does not exist"),
+    "read-counts-differ":     ("pipeline bug", "rerun", "unknown", "yes", "wrong ENA file set selected"),
+    "chem-no-whitelist-hit":  ("not 10x", "terminate", "unknown", "no",
+                               "can also be an ENA FASTQ pair that omits the barcode read (#15)"),
+    "chem-no-whitelist-rand": ("pipeline bug", "rerun", "gex", "yes", "STARsolo re-detection disagrees with run-level inference"),
+    "chem-ambiguous-layout":  ("pipeline bug", "rerun", "unknown", "yes", "layout matched nothing the inference accepts (too strict)"),
+    "no-single-gex-r2":       ("unsupported modality", "terminate", "feature-barcode", "yes",
+                               "R2 too short for GEX; can also be split-mate barcode halves or concatenated reads (#11)"),
+    "bc-variable-length":     ("pipeline bug", "rerun", "gex", "yes", "quality-trimmed barcode read rejected (too strict)"),
+    "r1-len-differs-runs":    ("pipeline bug", "rerun", "gex", "yes", ""),
+    "chem-group-mismatch":    ("pipeline bug", "rerun", "gex", "yes", "runs of one sample disagree on chemistry"),
+    "chem-json-unreadable":   ("pipeline bug", "rerun", "unknown", "yes", "empty or invalid chemistry.json reached RENAME10XSAMPLE"),
+    "truncated-gzip":         ("infrastructure", "rerun", "unknown", "unknown", "truncated download"),
+    "corrupt-fastq":          ("broken and no substitute", "terminate", "unknown", "unknown", "malformed FASTQ record in the archive copy"),
+    "sra-zero-length-read":   ("submission error", "terminate", "unknown", "unknown", "a read has zero length in the archive"),
+    "sra-too-few-fastq":      ("submission error", "terminate", "unknown", "unknown",
+                               "wrong number of reads per spot; split deposits can be recovered (#8)"),
+    "sra-mate-mismatch":      ("submission error", "terminate", "unknown", "unknown",
+                               "mates at different depths; mixed spot layouts can be recovered (#18)"),
+    "sra-ragged-output":      ("submission error", "terminate", "unknown", "unknown", "ragged fastq-dump output"),
+    "wget-empty-url":         ("no link available", "terminate", "unknown", "unknown", "no download URL in the archive metadata"),
+    "wget-exhausted":         ("infrastructure", "rerun", "unknown", "unknown", "transfer dropped after in-job retries"),
+    "wget-http-error":        ("infrastructure", "rerun", "unknown", "unknown", "HTTP 4xx/5xx, often transient"),
+    "star-sj-buffer":         ("pipeline bug", "rerun", "gex", "yes", "raise --limitOutSJcollapsed"),
+    "star-segfault":          ("pipeline bug", "rerun", "gex", "yes", "STAR segfault, deterministic: Velocyto in the paired-end call on a 3M whitelist (#31) or Velocyto after mapping on a >4e9-read sample (#32); rerun only after the Velocyto guard"),
+    "star-input-unreadable":  ("infrastructure", "rerun", "gex", "yes", "FASTQ unreadable when STARsolo started"),
+    "lustre-io-error":        ("infrastructure", "rerun", "unknown", "unknown", "Lustre I/O error"),
+    "lsf-memlimit":           ("infrastructure", "rerun", "unknown", "unknown", "LSF memory kill on every attempt"),
+    "lsf-runlimit":           ("infrastructure", "rerun", "unknown", "unknown", "LSF wall-clock kill"),
+    "star-fatal-other":       ("unknown", "review", "gex", "yes", "STAR fatal error"),
+    "no-error-captured":      ("unknown", "review", "unknown", "unknown", "no stderr captured"),
+    "UNCLASSIFIED":           ("unknown", "review", "unknown", "unknown", "error matched no rule"),
+}
+assert set(SAMPLE_REASON) == set(VERDICT) == {n for n, _ in RULES} | {"UNCLASSIFIED"}, \
+    "RULES, VERDICT and SAMPLE_REASON must name the same categories"
 
 
 def classify(text):
@@ -134,9 +192,45 @@ def base(tag):
     return tag.split(":")[0].replace("Loading ", "").strip()
 
 
-def load_attribution(repo, searchlist, datasets):
+def batch_of(source):
+    """Batch number out of a manifest/log filename, or None.
+
+    failures9.tsv -> 9, failed5.log -> 5. Anything else -> None, which is what
+    keeps reports/failures_<date>.tsv (the batch-3 regression fixture) on the
+    old code path.
+    """
+    if not source:
+        return None
+    m = re.fullmatch(r"(?:failures|failed|failedjobs)(\d+)\.(?:tsv|log)",
+                     os.path.basename(source))
+    return m.group(1) if m else None
+
+
+def load_attribution(repo, searchlist, datasets, source=None):
     run2sample, run2type = {}, {}
-    cands = [searchlist] if searchlist else [
+
+    # The run publishes its own attribution tables, and they beat the shared ones:
+    # data/tables/searchlist.tsv is per-batch and is overwritten by whichever run
+    # wrote it last, so on any run but the newest it silently attributes nothing.
+    # (Batch 9: 91 of 102 unresolved, 3 datasets reported instead of 8.) The
+    # per-dataset links.tsv has the identical 5-column header-less schema. Both
+    # of these vanish with results/ when the batch is uploaded, so this is
+    # best-effort by design — absent, it falls back to exactly the old behaviour.
+    own_lists, own_datasets = [], []
+    N = batch_of(source)
+    if N:
+        own_lists = sorted(glob.glob(
+            os.path.join(repo, f"results/batch{N}/metadata/*/links.tsv")))
+        # batch22 onward come from the deduplicated list, and batch24 onward from
+        # its biggest-first re-pack. The superseded dedup batch24-35 and the old,
+        # never-run data/tables/batches/batch22-49 share those names, so take only
+        # the first that exists, never more.
+        own_datasets = [p for p in (os.path.join(repo, f"data/tables/{d}/batch{N}.csv")
+                                    for d in ("batches_deduplicated_sorted", "batches_deduplicated",
+                                              "batches"))
+                        if os.path.exists(p)][:1]
+
+    cands = [searchlist] if searchlist else own_lists + [
         os.path.join(repo, "data/tables/searchlist.tsv"),
         os.path.join(repo, "data/searchlist.tsv"),
     ]
@@ -151,17 +245,28 @@ def load_attribution(repo, searchlist, datasets):
                 run2sample.setdefault(p[0], p[4])
                 run2type.setdefault(p[0], p[3])
 
-    # allhumandatasets first: 4602 datasets vs datasets.tsv's 266. The other way
-    # round left 1336 of 1814 failures unattributed.
+    # The run's own batch table first, then the deduplicated to-do list (one
+    # dataset per sample), then allhumandatasets for batches 1-21: 4602 datasets
+    # vs datasets.tsv's 266. The other way round left 1336 of 1814 failures
+    # unattributed.
     sample2dataset = {}
-    for fn in (datasets or [os.path.join(repo, "data/tables/allhumandatasets.tsv"),
-                            os.path.join(repo, "data/tables/datasets.tsv")]):
+    dedup = sorted(glob.glob(os.path.join(repo, "data/tables/batches_deduplicated/batch*.csv")))
+    dedup_n, dedup_at = 0, None
+    for fn in dict.fromkeys(datasets or own_datasets + dedup + [
+            os.path.join(repo, "data/tables/allhumandatasets.tsv"),
+            os.path.join(repo, "data/tables/datasets.tsv")]):
         if not os.path.exists(fn):
             continue
-        used.append(fn)
+        if fn in dedup and fn not in own_datasets:
+            dedup_n += 1            # reported once below, not file by file
+            dedup_at = len(used) if dedup_at is None else dedup_at
+        else:
+            used.append(fn)
         for r in csv.DictReader(open(fn, errors="replace"), delimiter="\t"):
             for s in (r.get("sample_id") or "").split(","):
                 sample2dataset.setdefault(s.strip(), r["dataset_id"])
+    if dedup_n:
+        used.insert(dedup_at, os.path.join(repo, f"data/tables/batches_deduplicated/*.csv ({dedup_n} files)"))
     return run2sample, run2type, sample2dataset, used
 
 
@@ -205,10 +310,13 @@ def main():
         return 0
 
     run2sample, run2type, sample2dataset, used = load_attribution(
-        args.repo, args.searchlist, args.datasets)
+        args.repo, args.searchlist, args.datasets, source)
 
     def dataset_of(tag):
         t = base(tag)
+        # FETCH10XMETA is tagged with the series itself, so there is nothing to join
+        if re.fullmatch(r"GSE\d+|E-[A-Z]+-\d+|PRJ[A-Z]+\d+", t):
+            return t
         return sample2dataset.get(run2sample.get(t, t)) or sample2dataset.get(t) or "unresolved"
 
     for r in rows:
@@ -221,7 +329,20 @@ def main():
     recov = [r for r in rows if r["recovered"] != "no"]
 
     print(f"source               : {source}")
-    print(f"attribution tables   : {', '.join(os.path.relpath(u, args.repo) for u in used) or 'none found'}")
+    # A run's own links.tsv comes as one file per dataset — 117 of them for batch 9 —
+    # so collapse them to the glob rather than printing an unreadable line.
+    shown, links_n, links_pat = [], 0, None
+    for u in used:
+        rel = os.path.relpath(u, args.repo)
+        m = re.fullmatch(r"(results/[^/]+/metadata)/[^/]+/links\.tsv", rel)
+        if m:
+            links_n += 1
+            links_pat = f"{m.group(1)}/*/links.tsv"
+        else:
+            shown.append(rel)
+    if links_pat:
+        shown.insert(0, f"{links_pat} ({links_n} datasets)")
+    print(f"attribution tables   : {', '.join(shown) or 'none found'}")
     print(f"failed tasks         : {len(rows)}")
     print(f"  permanently failed : {len(perm)}")
     print(f"  recovered on retry : {len(recov)}")

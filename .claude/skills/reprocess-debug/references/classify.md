@@ -18,9 +18,18 @@ Two properties matter when you read its output:
   memory kills wearing exit 130. `triage.py` prints every unclassified row with its work dir for
   exactly this reason. Read them; do not add a rule until you know what you are naming.
 
-Adding a rule: put it above the more general pattern it must beat, give it a `VERDICT` entry in
-the same commit, and re-run the batch-3 regression (`verify.md §regression`) to see what it
-stole.
+Adding a rule: put it above the more general pattern it must beat, give it a `VERDICT` entry
+**and a `SAMPLE_REASON` entry** in the same commit, and re-run the batch-3 regression
+(`verify.md §regression`) to see what it stole. An assert at import time refuses a category
+missing from either table. `SAMPLE_REASON` says what the category means for the sample it
+blocks (reason, rerun/terminate/review, modality, is10x, caveat); `bin/sample_failures.py`
+reads it, so the per-sample table can't drift from the rules.
+
+`disk-quota` and `chem-atac-only` were added on 2026-10-12 (batch 24). The batch-3 and batch-5
+regressions were unchanged, and only batch 24's counts moved (12 rows from `UNCLASSIFIED` to
+`disk-quota`). `disk-quota` sits first on purpose. A full disk breaks whatever happens to be
+writing, and the guard that trips next is not the cause, so `sample_failures.py` also checks the
+whole stderr for it, not only `first_error`.
 
 ## §shape — two commands before anything else
 
@@ -107,6 +116,42 @@ Using `datasets.tsv` alone left 1336 of 1814 failures unattributed; with `allhum
 first, only 14 were. `searchlist.tsv` is per-batch and gets overwritten, so a high unattributed
 count on a recent run usually means the searchlist is from a different batch — `triage.py` says
 which files it used and how many rows it could not place.
+
+**The remedy: the run publishes its own searchlist.** Each dataset's
+`results/<outdir>/metadata/<GSE>/links.tsv` has the identical five-column, header-less schema, and
+the batch's own input table supplies sample→dataset for exactly that batch. That is
+`data/tables/batches_deduplicated/batch<N>.csv` from batch 22 on, and `data/tables/batches/batch<N>.csv`
+for 1-21. `triage.py` takes the first of the two that exists, never both, because the never-run
+`batches/batch22-49` share the names. After it come all of `batches_deduplicated/` (one dataset
+per sample), then `allhumandatasets.tsv`, then `datasets.tsv`.
+`triage.py` now prefers both automatically — it infers the batch number from the manifest's
+filename and globs `results/batch<N>/metadata/*/links.tsv` ahead of `searchlist.tsv`, falling back
+silently when `results/` has been cleaned up. The `attribution tables :` line in its output says
+which it actually read.
+
+Pass them by hand only when that inference cannot fire — a manifest named something else, or a
+run whose `results/` is gone but whose `links.tsv` was archived:
+
+```bash
+cat results/<outdir>/metadata/*/links.tsv > /tmp/searchlist<N>.tsv
+.claude/skills/reprocess-debug/bin/triage.py --manifest data/tables/failures<N>.tsv \
+  --searchlist /tmp/searchlist<N>.tsv \
+  --datasets data/tables/batches_deduplicated/batch<N>.csv data/tables/allhumandatasets.tsv data/tables/datasets.tsv
+```
+
+(For batches 1-21, `data/tables/batches/batch<N>.csv` in place of the first.)
+
+Batch 9 is the worked example, in `run-index.md`: before this, its first triage left 91 of 102
+permanent failures `unresolved` and reported 3 datasets where there were 8.
+
+**Attribution is perishable, and for batches 1-8 it has already perished.** Re-running
+`triage.py --manifest data/tables/failures8.tsv` today returns `unresolved: 11`, where the
+archived `triage8.json` from 2026-09-16 has `GSE212964: 10, GSE213370: 1` — same categories,
+same counts, no dataset names. Nothing is wrong with the manifest; `searchlist.tsv` was
+overwritten by a later batch and `results/batch8/` has been cleaned up, so neither source of the
+run→sample join still exists. `archive_run.sh` now keeps each run's concatenated `links.tsv`
+so this stops happening, but it cannot recover the batches that predate it. **Read the dataset
+names off the archived `triage<N>.json` for those runs, not off a fresh triage.**
 
 **Always aggregate by dataset before reporting.** Failures are extremely concentrated: in August
 2026 the top 5 datasets were 1495 of 1814 (82%), and GSE109816 alone was 48%. A flat list of
