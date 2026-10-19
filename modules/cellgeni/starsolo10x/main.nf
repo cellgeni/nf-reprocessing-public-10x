@@ -5,7 +5,7 @@
 process STARSOLO10X {
     tag "${meta.id}"
     // v4.3 is the first wrapper release with `--wl` and `--skip-length-checks`.
-    container "docker://quay.io/cellgeni/starsolo:v4.3"
+    container "docker://quay.io/cellgeni/starsolo:v4.4"
     
     input:
     tuple val(meta), path(fastqs, stageAs: "fastqs/*")
