@@ -47,6 +47,7 @@ run by the `Launching \`main.nf\` [<run_name>]` line on line 2 of that file.
 | `reports/execution_trace_<ts>.txt` | live trace, **16 columns** — a different, smaller schema than `runlogs<N>.tsv` |
 | `reports/failures_<ts>.tsv` | one hand-made manifest from batch 3; same schema as `failures<N>.tsv` |
 | `nf-work/<hh>/<hash…>/` | task work dirs — **deleted for batches 1-5** (2026-09-14) **and 6-19** (by 2026-10-02); only the newest runs keep theirs, see `verify.md` |
+| `results/batch<N>/cleanup/` | only for runs with `-profile lineage_keep` (`plugins/nf-lineage-keep`): `deleted.tsv` (every work dir it emptied, or would have under `dryRun`), `processes.tsv`, `failed_tasks.tsv` (final failures + the upstream work dirs kept for them), `rerun.tsv` (a `--datasets` table of the failed samples). In such a run a **successful** sample's work dirs hold only `.command.*`/`.exitcode`; a failed sample's whole chain is intact |
 
 | `data/tables/sample_failures<N>.csv` | per-sample failure table for the run just archived, rebuilt by `archive_run.sh` each time (two runs of one batch share `N`); see §sample-failures |
 
@@ -180,9 +181,11 @@ is where the agent's scratchpad lives: a helper script there is missing on the e
 and an output written there lands in that node's `/tmp` and is lost (the first LSF run of
 `collect_run_logs.sh --outdir <scratchpad>` did exactly that). Keep job inputs and outputs on
 Lustre, e.g. `logs/lsf/debug/`; the wrapper refuses a `/tmp` path unless `--allow-tmp`. Several independent measurements are several
-background `farm_run.sh` calls, which LSF runs in parallel on separate nodes. Use
-`--queue transfer` for anything that needs outbound network, `--no-wait` to submit and follow
-with `bjobs -J rdebug-<name>`.
+background `farm_run.sh` calls, which LSF runs in parallel on separate nodes. Stay on
+`normal` even when the job needs the network: normal nodes reach ENA (https FTP and portal
+API), NCBI eutils and `fastq-dump` (checked 2026-10-19). `transfer` is for transfer jobs only and
+caps at 40 concurrent jobs, which the pipeline's WGET10X tasks need. Use `--no-wait` to submit
+and follow with `bjobs -J rdebug-<name>`.
 
 | On the head node — fine | Through `farm_run.sh` |
 |---|---|
