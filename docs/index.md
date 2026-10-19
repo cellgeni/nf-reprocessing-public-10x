@@ -16,6 +16,7 @@ README cannot: what public data does when you run it at scale.
 | [Archive pathologies](archive-pathologies.md) | A dataset failed and you want to know whether it is a known problem, or you are about to conclude that a public submission is broken |
 | [Reporting upstream](reporting-upstream.md) | You have confirmed a defect in a public submission and want to send it to GEO, SRA, ENA or ArrayExpress |
 | [Failure modes](failure-modes.md) | You want to know what a given exit code means, what usually fails and why, or which problems are known and open |
+| [tchem on our runs](tchem-benchmark.md) | You are deciding whether to use TusslChemistry (`tchem`), or its library-type and strand signals, beside our own chemistry inference. It records what tchem 0.1.0 did on 1,227 runs whose outcome we already knew |
 | [Post-mortems](post-mortems.md) | You want to read the write-up of a past run — what failed, how much of it was the data and how much was us. Links to every published report |
 
 ## Why these pages exist
