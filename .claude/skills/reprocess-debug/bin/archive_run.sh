@@ -108,7 +108,11 @@ RUN_TABLE="$(cut -f7 <<<"$RR_ROW" | grep -oE -- '--datasets[= ]+[^ ]+' | head -1
 # batch 9 published 38 near-empty matrices with no task failing, and for batches 1-8
 # that evidence no longer exists anywhere. Both files are small (140KB and 377KB for
 # batch 9). See SKILL.md §4 and verify.md §qc.
-OUTDIR="results/batch${N}"
+# The run's own --outdir, read from its command line like --datasets above; results/batch<N>
+# only when the command names none (or it no longer exists).
+OUTDIR="$(cut -f7 <<<"$RR_ROW" | grep -oE -- '--outdir[= ]+[^ ]+' | head -1 \
+    | sed -E 's/^--outdir[= ]+//; s/^["'\'']//; s/["'\'']$//; s:/+$::' || true)"
+[[ -n "$OUTDIR" && -d "$OUTDIR" ]] || OUTDIR="results/batch${N}"
 add "${OUTDIR}/mapping_qc_stats.tsv" "mapping_qc_stats.tsv" 1
 # REPROCESS10X_COLLATE's other run tables and REPROCESS10X_RUNREPORT's MultiQC report
 # (runs from 2026-10 on; older runs simply lack them). The HTML is self-contained, so
@@ -122,11 +126,17 @@ add "${OUTDIR}/multiqc/multiqc_report.html" "multiqc_report.html" 1
 # overwritten by the next run, so without this a re-triage years later cannot name a
 # single dataset — which is already true of batch 8 (see classify.md §attribution).
 # Built here the same way triage<N>.json is, below.
-LINKS_SRC="data/tables/links${N}.tsv"
-if [[ ! -s "$LINKS_SRC" && $DRY -eq 0 ]] && compgen -G "${OUTDIR}/metadata/*/links.tsv" >/dev/null; then
+# Keyed by run and rebuilt on every real invocation: a batch archived twice (a failed run,
+# then a -resume of part of it) must not carry the first run's table into the second's
+# archive. The old per-batch links<N>.tsv is used only when this run's metadata is gone.
+LINKS_SRC="data/tables/links${N}.${RUN}.tsv"
+if (( DRY == 0 )) && compgen -G "${OUTDIR}/metadata/*/links.tsv" >/dev/null; then
     echo "==> concatenating ${OUTDIR}/metadata/*/links.tsv -> $LINKS_SRC" >&2
     cat "${OUTDIR}"/metadata/*/links.tsv > "$LINKS_SRC" \
         || warn "could not build $LINKS_SRC; archiving without it"
+elif [[ ! -s "$LINKS_SRC" && -s "data/tables/links${N}.tsv" ]]; then
+    warn "no ${OUTDIR}/metadata/*/links.tsv; falling back to data/tables/links${N}.tsv, which may be another run's"
+    LINKS_SRC="data/tables/links${N}.tsv"
 fi
 if [[ -s "$LINKS_SRC" ]]; then
     add "$LINKS_SRC" "links${N}.tsv" 1

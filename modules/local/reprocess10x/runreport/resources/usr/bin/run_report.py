@@ -43,13 +43,13 @@ _DUR_H = {"ms": 1 / 3.6e6, "s": 1 / 3600, "m": 1 / 60, "h": 1.0, "d": 24.0}
 
 # Pipeline stages a sample passes through, in order, and the processes behind each.
 STAGES = [
-    ("download", ("WGET10X", "SRA2FASTQ", "BAM2FASTQ")),
+    ("download", ("WGET10X", "SRA2FASTQ", "SRAFIX", "BAM2FASTQ")),
     ("rename runs", ("RENAME10XRUN",)),
     ("merge sample", ("RENAME10XSAMPLE",)),
     ("align", ("STARSOLO10X", "CELLRANGER_COUNT")),
     ("qc", ("MAPPINGQC",)),
 ]
-RUN_LEVEL = {"WGET10X", "SRA2FASTQ", "BAM2FASTQ", "RENAME10XRUN"}
+RUN_LEVEL = {"WGET10X", "SRA2FASTQ", "SRAFIX", "BAM2FASTQ", "RENAME10XRUN"}
 
 
 def gb(s):
