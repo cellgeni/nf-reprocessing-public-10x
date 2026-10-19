@@ -35,9 +35,9 @@ FIELDS = ["batch", "run", "dataset_id", "sample_id", "is10x", "modality", "faile
           "reason", "stage", "process", "exit", "category", "runs", "detected_by", "comments"]
 
 STAGE = {"FETCH10XMETA": "metadata", "WGET10X": "download", "SRA2FASTQ": "download",
-         "BAM2FASTQ": "download", "RENAME10XRUN": "rename runs",
+         "SRAFIX": "download", "BAM2FASTQ": "download", "RENAME10XRUN": "rename runs",
          "RENAME10XSAMPLE": "merge sample", "STARSOLO10X": "align", "CELLRANGER_COUNT": "align"}
-RUN_LEVEL = ("WGET10X", "SRA2FASTQ", "BAM2FASTQ", "RENAME10XRUN")
+RUN_LEVEL = ("WGET10X", "SRA2FASTQ", "SRAFIX", "BAM2FASTQ", "RENAME10XRUN")
 SAMPLE_LEVEL = ("RENAME10XSAMPLE", "STARSOLO10X", "CELLRANGER_COUNT")
 ALIGNERS = ("STARSOLO10X", "CELLRANGER_COUNT")
 GROUP_RANK = {"terminate": 0, "rerun": 1, "review": 2}
