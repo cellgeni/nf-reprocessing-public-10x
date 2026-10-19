@@ -55,3 +55,8 @@ modules/.nf-test
 !.claude/skills/
 __pycache__
 issues
+
+# plugins/nf-lineage-keep: its unit tests and its own ignore files, which the
+# `test` and `.gitignore` rules above would otherwise swallow
+!/plugins/*/src/test/
+!/plugins/**/.gitignore
