@@ -85,8 +85,18 @@ def step_of(process):
     return last.replace("REPROCESS10X_", "")
 
 
+TAG_PREFIXES = ("Converting .bam file to .fastq for ", "Converting sra file to .fastq for ",
+                "Collecting QC stats for ", "Loading ")
+
+
 def run_of(tag):
-    return tag.split(":", 1)[0].strip()
+    """The accession in a task tag: `SRR1:file.fastq.gz` (WGET10X) and the prose tags of
+    BAM2FASTQ and friends (`Converting .bam file to .fastq for SRR1`) both give SRR1."""
+    t = tag.split(":", 1)[0].strip()
+    for pre in TAG_PREFIXES:
+        if t.startswith(pre):
+            return t[len(pre):].strip()
+    return t
 
 
 def read_tsv_dicts(path):

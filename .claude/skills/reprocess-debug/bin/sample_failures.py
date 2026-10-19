@@ -80,11 +80,12 @@ def tag_id(tag):
 
 
 def read_table(path):
+    """(dataset, sample) pairs requested. An empty sample_id asks for the whole series and
+    is kept as (dataset, ""), for build() to expand into the samples metadata found."""
     out = []
     for r in csv.DictReader(open(path, errors="replace"), delimiter="\t"):
-        for s in (r.get("sample_id") or "").split(","):
-            if s.strip():
-                out.append((r["dataset_id"].strip(), s.strip()))
+        samples = [s.strip() for s in (r.get("sample_id") or "").split(",") if s.strip()]
+        out.extend((r["dataset_id"].strip(), s) for s in samples or [""])
     return list(dict.fromkeys(out))
 
 
@@ -197,6 +198,14 @@ def build(args):
             p = line.rstrip("\n").split("\t")
             if len(p) >= 5:
                 links[(ds, p[4].strip())].append({"run": p[0], "species": p[1], "urls": p[2], "type": p[3]})
+
+    # A whole-series row becomes every sample its metadata found; with no links.tsv it stays
+    # (dataset, "") so the metadata branch below still reports the dataset as lost.
+    expanded = []
+    for ds, s in requested:
+        found = sorted({k[1] for k in links if k[0] == ds}) if not s else []
+        expanded.extend([(ds, x) for x in found] or [(ds, s)])
+    requested = list(dict.fromkeys(expanded))
 
     skipped = {}
     sk = os.path.join(args.outdir, "skipped_samples.tsv")

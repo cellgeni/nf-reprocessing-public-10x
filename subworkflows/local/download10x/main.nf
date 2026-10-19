@@ -192,12 +192,17 @@ workflow DOWNLOAD10X {
     // rebuilds the FASTQs from the data columns. The check emits only a verdict, joined back
     // onto WGET10X's own path, so SRA2FASTQ gets exactly the tuple it always did and a
     // -resume keeps its cached dumps. A run whose check itself failed has no verdict;
-    // `remainder: true` keeps it, and a null verdict goes to SRA2FASTQ as before.
+    // `remainder: true` keeps it, and a null verdict goes to SRA2FASTQ as before. An unmatched
+    // run arrives as [meta, sra, null] (join pads the whole right side with one null), so
+    // the closure takes the row and reads the verdict and reason by position.
     REPROCESS10X_SRACHECK(sras)
 
     sras_checked = sras
         .join(REPROCESS10X_SRACHECK.out.verdict, remainder: true)
-        .map { meta, sra, verdict, reason ->
+        .map { row ->
+            def (meta, sra) = [row[0], row[1]]
+            def verdict = row.size() > 2 ? row[2] : null
+            def reason  = row.size() > 3 ? row[3] : null
             if (verdict == 'fix')
                 log.info "Run ${meta.id}: fastq-dump cannot read it (${reason}); dumping with SRAFIX"
             tuple(meta, sra, verdict)
