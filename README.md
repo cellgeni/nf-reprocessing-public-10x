@@ -11,6 +11,9 @@ Nextflow pipeline for loading and reprocessing public 10x datasets from GEO, SRA
 | `workflow/main.nf` | Core workflow: metadata fetch, download, and STARsolo alignment |
 | `subworkflows/` | Download and STARsolo alignment subworkflows |
 | `modules/` | Individual process modules |
+| `lib/StarsoloResources.groovy` | STARsolo memory, run limit and queue predicted from each sample's read count |
+| `nextflow_schema.json` | Parameter schema: `--help`, validation and the launch summary (nf-schema) |
+| `notebooks/resource_prediction.ipynb` | Rerun/waste analysis and the fit behind `lib/StarsoloResources.groovy` |
 | `examples/datasets.tsv` | Example input file |
 | `examples/RESUME` | Example run script |
 | `nf-test.config` | nf-test configuration |
@@ -25,6 +28,11 @@ nextflow run main.nf --datasets <datasets.tsv> [OPTIONS]
 
 ### Parameters
 
+Parameters are defined in [`nextflow_schema.json`](nextflow_schema.json) and validated at launch
+by [nf-schema](https://github.com/nextflow-io/nf-schema): a wrong type (`--starsolo ture`), an
+unknown species or a missing `--datasets` stops the run before anything is fetched.
+`nextflow run main.nf --help` prints the full list; the main ones:
+
 | Parameter | Description | Default |
 |---|---|---|
 | `--datasets` | Path to a TSV file with dataset and sample IDs | required |
@@ -34,6 +42,7 @@ nextflow run main.nf --datasets <datasets.tsv> [OPTIONS]
 | `--metaonly` | Only fetch metadata — skip downloading and alignment | `false` |
 | `--starsolo` | Run STARsolo alignment after downloading | `false` |
 | `--cellranger` | Run Cell Ranger alignment after downloading (not yet implemented) | `false` |
+| `--no_raw` | Publish nothing under `raw/` (downloads, per-run and renamed FASTQs) and none of their index CSVs; the files then live only in the work dir | `false` |
 | `--help` | Print help message and exit | — |
 
 ### Input file format
@@ -71,6 +80,8 @@ nextflow run main.nf \
 
 ## Output structure
 
+With `--no_raw`, `raw/` and its index CSVs are not written; everything else is.
+
 ```
 results/
 ├── raw/
@@ -90,10 +101,32 @@ results/
 │   ├── bam.csv                     Index of all published BAMs
 │   ├── sra.csv                     Index of all published SRA files
 │   └── starsolo.csv                Index of all STARsolo outputs
-├── skipped_samples.tsv            Samples dropped for want of a usable species (absent if none)
-├── versions.yml                    Software versions used by each process
-└── mapping_qc_stats.tsv            Per-sample STARsolo mapping QC statistics
+├── multiqc/
+│   ├── multiqc_report.html         Run report (see below)
+│   └── multiqc_data/               Everything the report plots, as tables
+├── mapping_qc_stats.tsv            Per-sample STARsolo mapping QC statistics
+├── datasets.tsv                    Per dataset: samples requested / found / resolved / skipped / mapped, runs
+├── samples.tsv                     Per sample: resolved species, chemistry, whitelist, runs and origin
+├── runs.tsv                        Per run: sample, dataset, data type, species
+├── run_chemistry.tsv               Per run: inferred chemistry, confidence, read lengths, warnings
+├── skipped_samples.tsv             Samples dropped for want of a usable species (absent if none)
+└── versions.yml                    Software versions used by each process
 ```
+
+The run-level tables are written by `REPROCESS10X_COLLATE` and the report by
+`REPROCESS10X_RUNREPORT`, the last two tasks of a run. The report (MultiQC) covers task outcomes
+and wasted compute per process, the status of every sample (mapped, skipped, or the stage and exit
+code it failed at), chemistry calls, STARsolo mapping metrics, predicted vs observed STARsolo
+resources, and software versions.
+
+## STARsolo resources
+
+STARsolo's memory request, run limit and LSF queue are set per sample from its input read count,
+which is estimated before the task starts by reading the head of each R2 FASTQ
+([`lib/StarsoloResources.groovy`](lib/StarsoloResources.groovy)). Samples whose limit fits in 12 h
+go to `normal` (which backfills), the rest to `long`; each retry raises memory ×1.5 and time ×2.
+The coefficients come from [`notebooks/resource_prediction.ipynb`](notebooks/resource_prediction.ipynb),
+fitted on batches 9-21; refit there and paste the printed constants into the class.
 
 ## Species handling
 

@@ -39,7 +39,8 @@ usage() {
     echo
     echo "options: [--name N] [--mem 4G] [--cpus 1] [--queue normal] [--time H:MM]"
     echo "         [--group cellgeni] [--outdir DIR] [--no-wait] [--dry-run] [--allow-tmp] -- command…"
-    echo "queues : normal (12 h, default), long (48 h), transfer (outbound network)"
+    echo "queues : normal (12 h, default; has outbound network), long (48 h),"
+    echo "         transfer (transfer jobs only, 40 concurrent; not for compute)"
     exit 1
 }
 

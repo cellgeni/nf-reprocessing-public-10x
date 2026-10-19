@@ -111,7 +111,15 @@ TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
 # ---------------------------------------------------------------- 1. trace
 echo "==> nextflow log $RUN -> $TRACE" >&2
 tr ',' '\t' <<<"$FIELDS" > "$TRACE"
-nextflow log "$RUN" -f "$FIELDS" >> "$TRACE"
+# LevelDB can print to stdout ("corruption of 651 bytes: Invalid chunk checksum", seen
+# on batch 24 when two collections read the same session's cache at once; a re-run
+# alone was clean). Such a line is not a task row and stops duckdb from reading the
+# trace, so keep only full-width rows and say what was dropped. Run one at a time.
+nextflow log "$RUN" -f "$FIELDS" > "$TMPD/log.tsv"
+NF_WANT=$(awk -F',' '{print NF}' <<<"$FIELDS")
+awk -F'\t' -v n="$NF_WANT" 'NF == n' "$TMPD/log.tsv" >> "$TRACE"
+awk -F'\t' -v n="$NF_WANT" 'NF != n {print "warn:  dropped non-row line from nextflow log: " substr($0, 1, 200)}' \
+    "$TMPD/log.tsv" >&2
 echo "    $(( $(wc -l < "$TRACE") - 1 )) task rows" >&2
 
 # ---------------------------------------------------------------- 2. failed jobs

@@ -1,6 +1,8 @@
 include { WGET10X } from '../../../modules/cellgeni/wget10x'
 include { REPROCESS10X_BAM2FASTQ } from '../../../modules/local/reprocess10x/bam2fastq'
 include { SRA2FASTQ } from '../../../modules/cellgeni/sra2fastq'
+include { REPROCESS10X_SRACHECK } from '../../../modules/local/reprocess10x/sracheck'
+include { REPROCESS10X_SRAFIX } from '../../../modules/local/reprocess10x/srafix'
 include { RENAME10XRUN } from '../../../modules/cellgeni/rename10xrun'
 include { RENAME10XSAMPLE } from '../../../modules/cellgeni/rename10xsample'
 
@@ -184,13 +186,40 @@ workflow DOWNLOAD10X {
     REPROCESS10X_BAM2FASTQ(bams)
     
     sras = sras.mix(WGET10X.out.sra)
-    SRA2FASTQ(sras)
+
+    // Every .sra is checked first, and the few fastq-dump cannot read (NULL NAME column,
+    // GenericFastq schema; see modules/local/reprocess10x/sracheck) fork to SRAFIX, which
+    // rebuilds the FASTQs from the data columns. The check emits only a verdict, joined back
+    // onto WGET10X's own path, so SRA2FASTQ gets exactly the tuple it always did and a
+    // -resume keeps its cached dumps. A run whose check itself failed has no verdict;
+    // `remainder: true` keeps it, and a null verdict goes to SRA2FASTQ as before. An unmatched
+    // run arrives as [meta, sra, null] (join pads the whole right side with one null), so
+    // the closure takes the row and reads the verdict and reason by position.
+    REPROCESS10X_SRACHECK(sras)
+
+    sras_checked = sras
+        .join(REPROCESS10X_SRACHECK.out.verdict, remainder: true)
+        .map { row ->
+            def (meta, sra) = [row[0], row[1]]
+            def verdict = row.size() > 2 ? row[2] : null
+            def reason  = row.size() > 3 ? row[3] : null
+            if (verdict == 'fix')
+                log.info "Run ${meta.id}: fastq-dump cannot read it (${reason}); dumping with SRAFIX"
+            tuple(meta, sra, verdict)
+        }
+        .branch { _meta, _sra, verdict ->
+            fix:  verdict == 'fix'
+            dump: true
+        }
+
+    SRA2FASTQ(sras_checked.dump.map { meta, sra, _verdict -> tuple(meta, sra) })
+    REPROCESS10X_SRAFIX(sras_checked.fix.map { meta, sra, _verdict -> tuple(meta, sra) })
 
     // STEP 3: Rename fastq files to match 10x run naming convention
     fastqs2rename = WGET10X.out.fastq
         // Combine fastq files for each read as they were loaded separately
         .groupTuple(sort: 'hash', remainder: true)
-        .mix(SRA2FASTQ.out.fastq)
+        .mix(SRA2FASTQ.out.fastq, REPROCESS10X_SRAFIX.out.fastq)
 
     RENAME10XRUN(
         fastqs2rename,
@@ -275,7 +304,9 @@ workflow DOWNLOAD10X {
             REPROCESS10X_BAM2FASTQ.out.versions.first(),
             RENAME10XRUN.out.versions.first(),
             RENAME10XSAMPLE.out.versions.first(),
-            SRA2FASTQ.out.versions.first()
+            SRA2FASTQ.out.versions.first(),
+            REPROCESS10X_SRACHECK.out.versions.first(),
+            REPROCESS10X_SRAFIX.out.versions.first()
         )
 
     emit:
@@ -284,5 +315,6 @@ workflow DOWNLOAD10X {
     fastq          = fastqs
     bam            = bams
     sra            = sras
+    chemistry      = RENAME10XRUN.out.chemistry  // [ meta, <run>.chemistry.json ], for the run report
     versions       = versions
 }

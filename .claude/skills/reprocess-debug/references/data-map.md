@@ -41,10 +41,15 @@ run by the `Launching \`main.nf\` [<run_name>]` line on line 2 of that file.
 | `data/tables/batches/batch<N>.csv` | the input table for batches 1-21. Its `batch22`-`batch49` were **never run** and are superseded: same names, older and duplicated contents |
 | `data/tables/upload_batch<N>.csv` | delivery manifest, genuinely comma-separated: `id,dataset_id,path` |
 | `results/batch<N>/` | outdir |
+| `results/batch<N>/{datasets,samples,runs,run_chemistry}.tsv` | run tables from `REPROCESS10X_COLLATE` (runs from 2026-10 on). `runs.tsv` maps **every** run in `links.tsv` to its sample and dataset, including runs that failed before `RENAME10XRUN`, so it is the attribution table `searchlist.tsv` never reliably was |
+| `results/batch<N>/multiqc/multiqc_report.html` | `REPROCESS10X_RUNREPORT`: task outcomes and wasted core-h per process, a status for every sample with the stage/process/exit/work dir of its last failure, chemistry, mapping, STARsolo predicted vs observed resources. Its tables are in `multiqc/multiqc_data/multiqc_*_table.txt`. Rebuild it against a **live** run with `run_report.py` standalone (its docstring) via `farm_run.sh` |
 | `logs/lsf/reprocess{Output,Error}<JOBID>.log` | driver stdout/stderr from the bsub |
 | `reports/execution_trace_<ts>.txt` | live trace, **16 columns** — a different, smaller schema than `runlogs<N>.tsv` |
 | `reports/failures_<ts>.tsv` | one hand-made manifest from batch 3; same schema as `failures<N>.tsv` |
 | `nf-work/<hh>/<hash…>/` | task work dirs — **deleted for batches 1-5** (2026-09-14) **and 6-19** (by 2026-10-02); only the newest runs keep theirs, see `verify.md` |
+| `results/batch<N>/cleanup/` | only for runs with `-profile lineage_keep` (`plugins/nf-lineage-keep`): `deleted.tsv` (every work dir it emptied, or would have under `dryRun`), `processes.tsv`, `failed_tasks.tsv` (final failures + the upstream work dirs kept for them), `rerun.tsv` (a `--datasets` table of the failed samples). In such a run a **successful** sample's work dirs hold only `.command.*`/`.exitcode`; a failed sample's whole chain is intact |
+
+| `data/tables/sample_failures<N>.csv` | per-sample failure table for the run just archived, rebuilt by `archive_run.sh` each time (two runs of one batch share `N`); see §sample-failures |
 
 `<N>` is the batch number, no zero-padding, appended straight to the stem. **Batch 1 is the
 exception**: its trio is unsuffixed and lives in `data/`, not `data/tables/`
@@ -53,6 +58,65 @@ exception**: its trio is unsuffixed and lives in `data/`, not `data/tables/`
 What actually exists is patchy — as of September 2026, `{failedjobs,failed,runlogs}{2,3,5}` plus
 the batch-1 trio. Batches 4 and 6 finished with no triage artifacts at all. Check before
 assuming; `docs/agent_debug.md` listed a set that was already stale.
+
+## §sample-failures — why each sample failed
+
+`bin/sample_failures.py` writes one CSV row per requested sample that did not end in a usable
+output. `archive_run.sh` puts it in the run's archive as `sample_failures<N>.csv` and rebuilds
+`/nfs/cellgeni/reprocessing-runs/sample-failures.csv` from every per-run file (header once,
+group-writable, sorted by batch). Python `csv` quoting is used, and no field contains a newline,
+so `awk 'NR==1||FNR>1' batch*/*/sample_failures*.csv` also works.
+
+| column | values |
+|---|---|
+| `batch`, `run` | a run and its `-resume` both appear. That is history, so filter to the latest run of a batch for the current state |
+| `dataset_id`, `sample_id` | from the run's own `--datasets` table (e.g. `batch24_left.csv`, not `batch24.csv`) |
+| `is10x` | `yes` / `no` / `unknown` |
+| `modality` | `gex`, `atac`, `multiome`, `vdj`, `feature-barcode`, `flex`, `unknown`. GEO title tokens (SKILL.md §4) refine a `terminate` row's modality and say so in `comments` |
+| `failedgroup` | `rerun` (fixable by running again or after a fix) / `terminate` (the data can't become GEX) / `review` (a person must read the comment) |
+| `reason` | `unsupported modality`, `not 10x`, `no link available`, `broken and no substitute`, `submission error`, `no reference for species`, `pipeline bug`, `infrastructure`, `terminated run`, `unknown` |
+| `stage`, `process`, `exit` | where the blocking failure happened (`metadata` / `download` / `rename runs` / `merge sample` / `align` / `output check`) |
+| `category` | the `triage.py` category, linking the row back to `triage<N>.json` |
+| `runs` | the failing run accessions, `;`-joined |
+| `detected_by` | `task failure` / `unfinished` / `metadata` / `species skip` / `output check` |
+| `comments` | caveat, then the error line it was classified from, then any other causes on the sample |
+
+No work-dir column: `nf-work` is deleted right after debugging, so the evidence goes into
+`comments`.
+
+How a sample is decided, first match wins:
+1. Aligned in this run: check the published output. Velocyto is never checked.
+   - No Gene or GeneFull `filtered/matrix.mtx*`, or `Unique Gene` 0 → `pipeline bug` / `rerun`.
+   - Median genes per cell < 20, or `exon_u` < 0.05 with `Med_nFeature` < 100
+     → `unsupported modality` / `terminate`.
+2. Not aligned in this run, but a usable output is already published (an earlier run of the
+   session) → no row.
+3. The dataset has no `links.tsv` → map the FETCH10XMETA failure, or call it `terminated run`
+   if the run ended `ERR`.
+4. Requested but not in `links.tsv`:
+   - FETCH10XMETA said "no SRA/ENA metadata" → `no link available` / `terminate`.
+   - Otherwise → `pipeline bug` (#6, the shared-BioSample drop).
+5. In `skipped_samples.tsv` → `no reference for species`.
+6. Permanently failed tasks on the sample's runs or the sample itself → `SAMPLE_REASON[category]`.
+   - If several, the worst wins in the order terminate > rerun > review, and the rest go in
+     `comments`.
+   - A disk-quota message anywhere in a task's stderr overrides its first error.
+   - A `chem-no-whitelist-hit` run whose `chemistry.json` shows ≥ 5% ATAC barcodes is `atac`.
+   - **Some runs failed but others passed chemistry:**
+     - The failed runs are not 10x or not GEX → `terminated run` / `rerun`. Leaving them out is
+       correct, and the sample aligns from the rest once the group is released at the end of
+       the run. Batch 24 had 14 such samples, e.g. a multiome sample's ATAC run.
+     - The failed runs are real data that can't be fetched (no URL, submission error) → `review`,
+       because the sample could only be published from partial input (#12-13).
+7. Unfinished tasks in a run that ended `ERR` → `terminated run` / `rerun`. In a run that
+   ended `OK` → `review`.
+
+**Not covered:**
+- Samples published from a subset of their runs (#12-13).
+- V(D)J libraries that map well. Those still need the title scan and the top-genes check.
+- Silent degradation that leaves non-zero counts. Batch 24 found 5 such samples only by comparing against run 1.
+
+Batch 24's two files were backfilled by hand after its outputs were deleted. See their `manifest.txt`.
 
 ## §reference — cross-run tables
 
@@ -117,9 +181,11 @@ is where the agent's scratchpad lives: a helper script there is missing on the e
 and an output written there lands in that node's `/tmp` and is lost (the first LSF run of
 `collect_run_logs.sh --outdir <scratchpad>` did exactly that). Keep job inputs and outputs on
 Lustre, e.g. `logs/lsf/debug/`; the wrapper refuses a `/tmp` path unless `--allow-tmp`. Several independent measurements are several
-background `farm_run.sh` calls, which LSF runs in parallel on separate nodes. Use
-`--queue transfer` for anything that needs outbound network, `--no-wait` to submit and follow
-with `bjobs -J rdebug-<name>`.
+background `farm_run.sh` calls, which LSF runs in parallel on separate nodes. Stay on
+`normal` even when the job needs the network: normal nodes reach ENA (https FTP and portal
+API), NCBI eutils and `fastq-dump` (checked 2026-10-19). `transfer` is for transfer jobs only and
+caps at 40 concurrent jobs, which the pipeline's WGET10X tasks need. Use `--no-wait` to submit
+and follow with `bjobs -J rdebug-<name>`.
 
 | On the head node — fine | Through `farm_run.sh` |
 |---|---|

@@ -133,6 +133,8 @@ Both use the `737K-august-2016.txt` whitelist, 16 bp CB, and 10 bp UMI. FASTQ ge
 
 Renaming is still safe if one CB+UMI read and one biological read are identified, but exact chemistry/strand should be `layout_only` or decided from metadata or a strand test. For STARsolo, 3′ generally uses `--soloStrand Forward`; 5′ generally uses `--soloStrand Reverse`.
 
+A reference-free strand test (polyA/T, chrM, nuclear transcripts) resolves this for most runs. It cannot resolve it when the barcode read stops at the UMI. [tchem-benchmark.md](tchem-benchmark.md) measures one such test, TusslChemistry's, against STARsolo's test alignment.
+
 ### 3.3 3′ v3/v3.1/LT/HT
 
 These share the same basic FASTQ geometry and `3M-february-2018.txt` whitelist:

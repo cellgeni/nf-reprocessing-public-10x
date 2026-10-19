@@ -32,6 +32,8 @@ workflow REPROCESS10X {
     resolved_fastqs = channel.empty()
     starsolo        = channel.empty()
     soloqc          = channel.empty()
+    chemistry       = channel.empty()
+    planned         = channel.empty()
     cellranger      = channel.empty()
     skipped         = channel.empty()
 
@@ -107,6 +109,7 @@ workflow REPROCESS10X {
         runs           = runs.mix(DOWNLOAD10X.out.runs)
         bams           = bams.mix(DOWNLOAD10X.out.bam)
         sras           = sras.mix(DOWNLOAD10X.out.sra)
+        chemistry      = chemistry.mix(DOWNLOAD10X.out.chemistry)
         versions       = versions.mix(DOWNLOAD10X.out.versions)
     }
 
@@ -137,6 +140,7 @@ workflow REPROCESS10X {
         REPROCESS10X_MAPPINGQC(samples_by_dataset)
 
         soloqc   = soloqc.mix(REPROCESS10X_MAPPINGQC.out.tsv)
+        planned  = planned.mix(STARSOLO10X_HUMAN.out.planned, STARSOLO10X_MOUSE.out.planned)
         versions = versions
             .mix(
                 STARSOLO10X_HUMAN.out.versions,
@@ -175,6 +179,8 @@ workflow REPROCESS10X {
     sra            = sras
     starsolo       = starsolo
     soloqc         = soloqc
+    chemistry      = chemistry
+    planned        = planned
     cellranger     = cellranger
     skipped        = skipped
     versions       = versions
