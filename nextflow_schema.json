@@ -57,6 +57,13 @@
                     "default": false,
                     "description": "Align with Cell Ranger after downloading.",
                     "fa_icon": "fas fa-dna"
+                },
+                "no_raw": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Publish nothing under raw/ (downloaded BAM/SRA/FASTQ, per-run and renamed FASTQs) nor their index CSVs.",
+                    "help_text": "The files then exist only in the work directory. Pair it with `-profile lineage_keep` to have them deleted as each sample finishes, while a failed sample's stay for its -resume.",
+                    "fa_icon": "fas fa-ban"
                 }
             }
         },

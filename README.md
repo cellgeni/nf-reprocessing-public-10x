@@ -42,6 +42,7 @@ unknown species or a missing `--datasets` stops the run before anything is fetch
 | `--metaonly` | Only fetch metadata — skip downloading and alignment | `false` |
 | `--starsolo` | Run STARsolo alignment after downloading | `false` |
 | `--cellranger` | Run Cell Ranger alignment after downloading (not yet implemented) | `false` |
+| `--no_raw` | Publish nothing under `raw/` (downloads, per-run and renamed FASTQs) and none of their index CSVs; the files then live only in the work dir | `false` |
 | `--help` | Print help message and exit | — |
 
 ### Input file format
@@ -78,6 +79,8 @@ nextflow run main.nf \
 ```
 
 ## Output structure
+
+With `--no_raw`, `raw/` and its index CSVs are not written; everything else is.
 
 ```
 results/

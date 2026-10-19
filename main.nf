@@ -175,12 +175,16 @@ workflow {
     )
 
     publish:
+    // --no_raw publishes none of raw/ (downloads, conversions, renamed FASTQs) nor their
+    // index CSVs: an empty channel publishes nothing. The files still exist in nf-work, and
+    // only there, so they go with it; -profile lineage_keep empties them as each sample
+    // finishes and keeps a failed sample's for its -resume.
     metadata       = REPROCESS10X.out.metadata.map { meta, files -> tuple(unwrapGroupKeys(meta), files) }
-    bam            = REPROCESS10X.out.bam.map { meta, bam -> unwrapGroupKeys(meta) + [path: bam] }
-    sra            = REPROCESS10X.out.sra.map { meta, sra -> unwrapGroupKeys(meta) + [path: sra]}
-    original_fastq = REPROCESS10X.out.original_fastq.map { meta, fastqs -> unwrapGroupKeys(meta) + [paths: fastqs] }
-    runs           = REPROCESS10X.out.runs.map { meta, fastqs -> unwrapGroupKeys(meta) + [paths: fastqs] }
-    fastq          = REPROCESS10X.out.fastq
+    bam            = params.no_raw ? channel.empty() : REPROCESS10X.out.bam.map { meta, bam -> unwrapGroupKeys(meta) + [path: bam] }
+    sra            = params.no_raw ? channel.empty() : REPROCESS10X.out.sra.map { meta, sra -> unwrapGroupKeys(meta) + [path: sra]}
+    original_fastq = params.no_raw ? channel.empty() : REPROCESS10X.out.original_fastq.map { meta, fastqs -> unwrapGroupKeys(meta) + [paths: fastqs] }
+    runs           = params.no_raw ? channel.empty() : REPROCESS10X.out.runs.map { meta, fastqs -> unwrapGroupKeys(meta) + [paths: fastqs] }
+    fastq          = params.no_raw ? channel.empty() : REPROCESS10X.out.fastq
         .flatMap { meta, fastqs -> fastqs.collect { file -> [meta, file] } }
         .map { meta, fastq -> unwrapGroupKeys(meta) + [path: fastq] }
     starsolo   = REPROCESS10X.out.starsolo.map { meta, starsolo -> alignerIndexRow(unwrapGroupKeys(meta)) + [path: starsolo] }

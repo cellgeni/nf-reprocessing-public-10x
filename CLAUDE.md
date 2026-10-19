@@ -83,7 +83,7 @@ up to batch 21 can be re-measured.
 main.nf                     nf-schema validation, publish:/output: blocks, the two end-of-run tasks
 ├── workflow/main.nf        REPROCESS10X — the real orchestrator
 │   ├── modules/cellgeni/fetch10xmeta          → links.tsv, one row per run
-│   ├── subworkflows/local/download10x         → WGET10X → {BAM2FASTQ,SRA2FASTQ} → RENAME10XRUN → RENAME10XSAMPLE
+│   ├── subworkflows/local/download10x         → WGET10X → {BAM2FASTQ, SRACHECK → SRA2FASTQ | SRAFIX} → RENAME10XRUN → RENAME10XSAMPLE
 │   ├── subworkflows/local/starsolo10x         → instantiated twice, once per species; sets meta.resources
 │   ├── modules/cellgeni/cellranger/count      → likewise, human + mouse
 │   └── modules/local/reprocess10x/mappingqc   → one QC job per dataset, across all its species
@@ -179,7 +179,12 @@ last failure; the stderr and the classification still come from `collect_run_log
 
 **Two `sra2fastq` modules exist and only one is wired up.** `download10x` imports
 `modules/cellgeni/sra2fastq`; `modules/local/reprocess10x/sra2fastq/` — the more careful
-implementation — is dead code. Check the `include {` lines before editing any module:
+implementation — is dead code. Every `.sra` first goes through `REPROCESS10X_SRACHECK`, which
+emits only a verdict: `ok` runs reach `SRA2FASTQ` with WGET10X's own path (so its task hash, and a
+`-resume`, are unaffected), and `fix` runs — NULL `NAME` column or `GenericFastq` schema, which
+`fastq-dump` and `fasterq-dump` cannot read — go to `REPROCESS10X_SRAFIX`, which rebuilds the
+FASTQs from `READ`/`QUALITY`/`READ_LEN` with `vdb-dump`. On a healthy run SRAFIX's reads and
+qualities are identical to SRA2FASTQ's; only the deflines differ. Check the `include {` lines before editing any module:
 
 ```bash
 grep -rn "include {" subworkflows/ workflow/ main.nf
@@ -213,6 +218,19 @@ that key changed STARsolo's task hash, so a pre-2026-10 batch re-runs STARsolo o
 **MultiQC needs a `TMPDIR` inside the work dir.** It builds `multiqc_data/` in `TMPDIR` and copies
 it across with its modes, dropping the work dir's setgid bit, so files land in the user's primary
 group — which has no quota on `/lustre` ("Disk quota exceeded"). RUNREPORT exports one.
+
+**`-profile lineage_keep` cleans `nf-work` during the run.** It loads
+[plugins/nf-lineage-keep](plugins/nf-lineage-keep/README.md) (install it first with `make install`
+on the `transfer` queue; it is not in the registry, which is why it is a profile and not in the
+main `plugins {}` block). A task whose downstream lineage all succeeded keeps only `.command.*`
+and `.exitcode`; everything upstream of a final failure, and every task of the failed sample, is
+left intact, and `<outdir>/cleanup/rerun.tsv` lists those samples for a `-resume`. `_STARtmp`
+goes whatever the outcome. `dryRun = true` in `configs/lineage_keep.config` until a batch has been
+checked. Publishing hard-links, so emptying a work dir frees only what was never published —
+`deleted.tsv`'s `freed_bytes` says how much. `--no_raw` stops publishing `raw/`, which is what
+makes the FASTQs actually go. If you add a process, decide whether it belongs in
+`singleUseProcesses` (each upstream file read by exactly one of its tasks) or `barrierProcesses`
+(collects everything at the end); getting single-use wrong is the one way it deletes too early.
 
 **`REPROCESS10X_BAM2FASTQ`'s stub is broken** — it touches `<id>.fastq.gz` but declares
 `path("fastqs/*")`, which blocks stub-testing any BAM-origin path.
