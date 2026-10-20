@@ -59,6 +59,20 @@ class WorkDirCleaner implements Closeable {
      * trace's workdir column still points somewhere.
      */
     Stats clean(Path dir, Set<String> keep, String process, String name, String hash) {
+        return empty(dir, keep ?: Collections.<String>emptySet(), -1, dryRun ? 'dry-run' : 'delete', process, name, hash)
+    }
+
+    /**
+     * Empty the work directory of a failed attempt. Besides the logs, regular files smaller
+     * than `keepBelow` bytes and symlinks survive: they cost nothing and are what the failure
+     * is debugged from. `kind` (`retried` or `failed`) is the action recorded.
+     */
+    Stats cleanFailed(Path dir, long keepBelow, String kind, String process, String name, String hash) {
+        return empty(dir, Collections.<String>emptySet(), keepBelow, dryRun ? "dry-run-${kind}".toString() : kind, process, name, hash)
+    }
+
+    /** `keepBelow` < 0: no size rule, symlinks go too */
+    private Stats empty(Path dir, Set<String> keep, long keepBelow, String action, String process, String name, String hash) {
         final stats = new Stats()
         if( dir == null || !Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS) )
             return stats
@@ -66,13 +80,13 @@ class WorkDirCleaner implements Closeable {
             for( Path entry : entries ) {
                 if( keepLogs && isLog(entry.fileName.toString()) )
                     continue
-                removeTree(entry, keep ?: Collections.<String>emptySet(), stats)
+                removeTree(entry, keep, stats, keepBelow)
             }
         }
         catch( Exception e ) {
             log.warn "[nf-lineage-keep] unable to clean ${dir} -- ${e.message ?: e}"
         }
-        record(dryRun ? 'dry-run' : 'delete', process, name, hash, dir, stats)
+        record(action, process, name, hash, dir, stats)
         return stats
     }
 
@@ -142,7 +156,7 @@ class WorkDirCleaner implements Closeable {
         fileName.startsWith('.command.') || fileName == '.exitcode'
     }
 
-    private void removeTree(Path root, Set<String> keep, Stats stats) {
+    private void removeTree(Path root, Set<String> keep, Stats stats, long keepBelow = -1) {
         Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
             @Override
             FileVisitResult preVisitDirectory(Path d, BasicFileAttributes attrs) {
@@ -151,6 +165,8 @@ class WorkDirCleaner implements Closeable {
             @Override
             FileVisitResult visitFile(Path f, BasicFileAttributes attrs) {
                 if( f.toString() in keep )
+                    return FileVisitResult.CONTINUE
+                if( keepBelow >= 0 && (attrs.isSymbolicLink() || (attrs.isRegularFile() && attrs.size() < keepBelow)) )
                     return FileVisitResult.CONTINUE
                 stats.files++
                 if( attrs.isRegularFile() ) {

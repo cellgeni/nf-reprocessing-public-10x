@@ -42,13 +42,27 @@ whole. Pinned tasks are never touched. Barrier failures pin nothing.
 
 `scratch` globs are removed as soon as any attempt ends, whatever the outcome.
 
+Failed attempts hold nothing a reader or a `-resume` uses: a failed attempt emits no
+outputs, and a `-resume` re-runs a failed task in a new directory. Two switches empty them
+as soon as they end, without waiting for the lineage:
+
+- `cleanRetriedAttempts` — an attempt that failed and will be retried;
+- `cleanFailedTasks` — every attempt of a task that failed for good. Pinning is unchanged:
+  the task's ancestors and its sample stay whole, so the re-run still finds them cached.
+
+Both keep the logs, symlinks and regular files under `failedKeepBelow` (default 1 MB), which
+is what a failure is debugged from. Both keep the **directory itself**. On `-resume`,
+Nextflow walks a task's attempt hashes in order and only moves on to attempt n+1 while
+attempt n's directory exists. If a failed attempt's directory were removed, a task whose
+retry succeeded would run again, and so would everything downstream of it.
+
 ## Outputs (`<outputDir>/cleanup/` by default)
 
 | file | content |
 |---|---|
-| `deleted.tsv` | one row per clean: action, process, task, hash, dir, files, `bytes` (apparent), `freed_bytes` (files with a single link) |
+| `deleted.tsv` | one row per clean: action, process, task, hash, dir, files, `bytes` (apparent), `freed_bytes` (files with a single link). Actions: `delete` (an OK task), `delete-held` (its held outputs), `scratch`, `retried` and `failed` (failed attempts), each `dry-run-`/`dry-run` in a dry run |
 | `processes.tsv` | per process output: reading processes, publishable — check this first on a new pipeline |
-| `failed_tasks.tsv` | final failures with their re-run key and the work dirs kept upstream |
+| `failed_tasks.tsv` | final failures with their re-run key and the work dirs kept upstream (with `cleanFailedTasks`, the failure's own dir holds only logs and small files) |
 | `rerun.tsv` | `dataset_id<TAB>sample_id`, samples comma-joined, empty = whole dataset. Only written when the run completed |
 
 With `publish mode 'link'`, deleting a work file whose published twin exists frees nothing:
@@ -57,13 +71,16 @@ With `publish mode 'link'`, deleting a work file whose published twin exists fre
 ## Config
 
 ```groovy
-plugins { id 'nf-lineage-keep@0.1.0' }
+plugins { id 'nf-lineage-keep@0.2.0' }
 
 lineageKeep {
     enabled            = true
-    dryRun             = true      // default: log only
+    dryRun             = true      // default: log only. Leaving it out does NOT turn it off
     keepLogs           = true      // default
     keepFailedAttempts = false     // default: superseded failed attempts go with their task
+    cleanRetriedAttempts = false   // default: true empties a retried attempt as it ends
+    cleanFailedTasks   = false     // default: true empties a final failure's own attempts
+    failedKeepBelow    = '1 MB'    // default: what those two leave, besides logs and symlinks
     barrierProcesses   = ['REPORT', 'COLLATE']
     singleUseProcesses = ['ALIGN', 'RENAME*']
     scratch            = ['ALIGN:{_STARtmp,**/_STARtmp}']
@@ -96,7 +113,7 @@ queue:
 
 ```bash
 make test      # Spock tests
-make install   # unpacks into ${NXF_PLUGINS_DIR:-~/.nextflow/plugins}/nf-lineage-keep-0.1.0
+make install   # unpacks into ${NXF_PLUGINS_DIR:-~/.nextflow/plugins}/nf-lineage-keep-0.2.0
 ```
 
 ## Limits

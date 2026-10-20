@@ -159,6 +159,53 @@ class TaskGraphTest extends Specification {
         deletableKeys().isEmpty()
     }
 
+    def 'failed attempts are handed out for emptying per switch, once each, and pinning is unchanged'() {
+        given:
+        final w = done('wget/R1', WGET, [], [RUN] as Set)
+        graph.register('run/R1', RUN, '/w/run1a', [w], 'run/R1', 'h1', 'GSE1', 'S1')
+
+        expect: 'a retried attempt goes only with cleanRetried'
+        graph.failedDirs('run/R1', '/w/run1a', true, false, true).isEmpty()
+        graph.failedDirs('run/R1', '/w/run1a', true, true, false) == ['/w/run1a']
+        graph.failedDirs('run/R1', '/w/run1a', true, true, false).isEmpty()
+
+        when: 'attempt 2 fails for good'
+        graph.register('run/R1', RUN, '/w/run1b', [w], 'run/R1', 'h2', 'GSE1', 'S1')
+        graph.failed('run/R1', '1')
+
+        then: 'cleanFailed empties every attempt not emptied yet; the task and its producer stay pinned'
+        graph.failedDirs('run/R1', '/w/run1b', false, true, false).isEmpty()
+        graph.failedDirs('run/R1', '/w/run1b', false, false, true) == ['/w/run1b']
+        graph.node('run/R1').pinned
+        graph.node('wget/R1').pinned
+        deletableKeys(true).isEmpty()
+    }
+
+    def 'with cleanFailed alone, a final failure empties its earlier retried attempts too'() {
+        given:
+        graph.register('wget/R1', WGET, '/w/w1a', [], 'wget/R1', 'h1', 'GSE1', 'S1')
+        graph.register('wget/R1', WGET, '/w/w1b', [], 'wget/R1', 'h2', 'GSE1', 'S1')
+        graph.failed('wget/R1', '1')
+
+        expect:
+        graph.failedDirs('wget/R1', '/w/w1b', false, false, true) == ['/w/w1a', '/w/w1b']
+    }
+
+    def 'the bulk clean of a task whose retry succeeded skips the attempt already emptied'() {
+        given:
+        graph.register('wget/R1', WGET, '/w/w1a', [], 'wget/R1', 'h1', 'GSE1', 'S1')
+        graph.failedDirs('wget/R1', '/w/w1a', true, true, false)
+        graph.register('wget/R1', WGET, '/w/w1b', [], 'wget/R1', 'h2', 'GSE1', 'S1')
+        graph.succeeded('wget/R1', [:], [])
+
+        when:
+        final c = graph.collectDeletable(true)
+
+        then: 'the observer cleans attemptDirs minus emptiedDirs'
+        c*.node*.key == ['wget/R1']
+        c[0].node.attemptDirs - c[0].node.emptiedDirs == ['/w/w1b']
+    }
+
     def 'a non-single-use consumer process must terminate first'() {
         given:
         final w = done('wget/R1', WGET, [], ['WF:OTHER'] as Set)
