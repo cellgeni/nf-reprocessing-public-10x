@@ -1,3 +1,9 @@
+---
+title: Archive pathologies
+parent: Knowledge base
+nav_order: 1
+---
+
 # Archive pathologies
 
 A catalogue of defects and traps found in public 10x submissions while reprocessing them, one

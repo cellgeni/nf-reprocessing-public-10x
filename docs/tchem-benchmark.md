@@ -1,3 +1,9 @@
+---
+title: tchem on our runs
+parent: Knowledge base
+nav_order: 4
+---
+
 # tchem on our runs
 
 [TusslChemistry](https://github.com/Tussl-Co/TusslChemistry) (`tchem`) is a Rust tool, made

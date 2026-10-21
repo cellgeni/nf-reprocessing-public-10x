@@ -1,3 +1,9 @@
+---
+title: Post-mortems
+parent: Knowledge base
+nav_order: 5
+---
+
 # Post-mortems
 
 Every published failure post-mortem for this pipeline, with its link. **This file is the index
@@ -73,7 +79,7 @@ Recorded so that an absence reads as an absence rather than as a page someone fo
 
 The procedure — how the page is built, the house style that keeps the family recognisable, and
 the theme bug that makes a report unreadable rather than merely ugly — is
-[`references/report.md`](../.claude/skills/reprocess-debug/references/report.md) in the
+[`references/report.md`](https://github.com/cellgeni/nf-reprocessing-public-10x/blob/main/.claude/skills/reprocess-debug/references/report.md) in the
 `reprocess-debug` skill. Two steps matter for this file:
 
 1. Publish the page as an artifact. Re-publishing the same source file redeploys to the **same**

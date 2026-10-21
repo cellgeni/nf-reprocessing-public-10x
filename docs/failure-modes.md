@@ -1,3 +1,9 @@
+---
+title: Failure modes
+parent: Knowledge base
+nav_order: 3
+---
+
 # Failure modes
 
 What goes wrong when this pipeline runs at scale, what each failure looks like, and whether the
@@ -5,7 +11,7 @@ cause is the pipeline or the data.
 
 This is the orientation page. The debugging *procedure* — collecting a run's logs, classifying
 them, verifying a claim against the work directories — lives in the `reprocess-debug` skill
-under [`.claude/skills/reprocess-debug/`](../.claude/skills/reprocess-debug/), which is the
+under [`.claude/skills/reprocess-debug/`](https://github.com/cellgeni/nf-reprocessing-public-10x/tree/main/.claude/skills/reprocess-debug), which is the
 right place to start if you have a specific run to triage.
 
 **Per-sample record.** `/nfs/cellgeni/reprocessing-runs/sample-failures.csv` lists, for every
@@ -20,7 +26,7 @@ folder. Columns are described in the skill's `references/data-map.md §sample-fa
 **Runs with `-profile lineage_keep`** also write `<outdir>/cleanup/failed_tasks.tsv` (every
 task that failed for good, with the upstream work dirs kept for it) and `rerun.tsv`, a
 `--datasets` table of the failed samples to re-run with `-resume`. The plugin behind it,
-[`plugins/nf-lineage-keep`](../plugins/nf-lineage-keep/README.md), empties the work dirs of
+[`plugins/nf-lineage-keep`](https://github.com/cellgeni/nf-reprocessing-public-10x/blob/main/plugins/nf-lineage-keep/README.md), empties the work dirs of
 samples whose whole lineage succeeded and never touches a failed one's chain.
 
 ## Two things that make failures hard to read
@@ -31,7 +37,7 @@ recorded `OK` in `.nextflow/history` and had 7 permanent failures. Always count 
 never infer from the status.
 
 **`attempt` is not diagnostic either.** The `errorStrategy` in
-[`nextflow.config`](../nextflow.config) gives *every* task one retry whatever its exit code, and
+[`nextflow.config`](https://github.com/cellgeni/nf-reprocessing-public-10x/blob/main/nextflow.config) gives *every* task one retry whatever its exit code, and
 only the codes in the retriable set any more than that. That is intentional — see
 [Which failures are worth retrying](#which-failures-are-worth-retrying). The effect on triage is
 that in August 2026, 1795 of 1814 failures sat at `attempt = 2`: a property of the config, not a
@@ -63,7 +69,7 @@ running out of memory.
 ## Which failures are worth retrying
 
 Every task gets one retry whatever its exit code; the codes below get a third attempt. The
-`task.attempt == 1` clause in [`nextflow.config`](../nextflow.config) is deliberate and
+`task.attempt == 1` clause in [`nextflow.config`](https://github.com/cellgeni/nf-reprocessing-public-10x/blob/main/nextflow.config) is deliberate and
 load-bearing — **do not remove it.** An exit code does not tell you whether a failure was
 transient, so everything gets a second chance, and the cost of rerunning a doomed task is
 accepted in exchange for not discarding a recoverable one. A task is also only ignored after

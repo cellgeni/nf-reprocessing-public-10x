@@ -1,3 +1,9 @@
+---
+title: 10x chemistry reference
+parent: Reference
+nav_order: 5
+---
+
 # 10x Genomics chemistry and FASTQ geometry reference
 
 _Last updated: 2026-06-26_
