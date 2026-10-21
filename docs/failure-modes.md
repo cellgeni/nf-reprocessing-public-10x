@@ -27,7 +27,9 @@ folder. Columns are described in the skill's `references/data-map.md §sample-fa
 task that failed for good, with the upstream work dirs kept for it) and `rerun.tsv`, a
 `--datasets` table of the failed samples to re-run with `-resume`. The plugin behind it,
 [`plugins/nf-lineage-keep`](https://github.com/cellgeni/nf-reprocessing-public-10x/blob/main/plugins/nf-lineage-keep/README.md), empties the work dirs of
-samples whose whole lineage succeeded and never touches a failed one's chain.
+samples whose whole lineage succeeded and keeps a failed one's chain upstream of the failure.
+The failed task's own work dir keeps its logs and small reports (under 1 MB) but not its
+partial outputs, which a `-resume` would never reuse.
 
 ## Two things that make failures hard to read
 

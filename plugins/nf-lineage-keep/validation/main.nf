@@ -4,7 +4,8 @@
  * per-sample merge -> per-sample align -> per-dataset QC, plus two end-of-run barriers,
  * publishing every stage by hard link as main.nf does. ALIGN fails for good on
  * --fail (after one retry, as the pipeline's errorStrategy does) and leaves scratch
- * behind on every attempt, like STAR's _STARtmp.
+ * behind on every attempt, like STAR's _STARtmp, plus a partial BAM. DOWNLOAD of the
+ * runs in --flaky fails once and succeeds on its retry.
  *
  *   ./run.sh            # see run.sh: a run, checks, then a -resume of rerun.tsv
  */
@@ -30,15 +31,24 @@ process FETCH {
     """
 }
 
+// a run in --flaky fails its first attempt, leaving a partial download and a small
+// report behind, and succeeds on the retry
 process DOWNLOAD {
     tag "${meta.id}"
+    errorStrategy { task.attempt == 1 ? 'retry' : 'ignore' }
     input:
     val meta
     output:
     tuple val(meta), path("${meta.id}.fastq.gz"), emit: fastq
     path 'versions.yml', emit: versions
     script:
+    def flaky = task.attempt == 1 && params.flaky.tokenize(',').contains(meta.id)
     """
+    if ${flaky}; then
+        head -c 1500000 /dev/urandom > partial.fastq.gz
+        echo 'connection reset' > report.txt
+        echo "simulated download failure" >&2; exit 1
+    fi
     head -c 200000 /dev/urandom > ${meta.id}.fastq.gz
     echo 'DOWNLOAD: 1' > versions.yml
     """
@@ -85,7 +95,11 @@ process ALIGN {
     """
     mkdir -p ${meta.id}/_STARtmp
     head -c 300000 /dev/urandom > ${meta.id}/_STARtmp/scratch.bin
-    if [[ "${meta.id}" == "${params.fail}" ]]; then echo "simulated failure" >&2; exit 1; fi
+    if [[ "${meta.id}" == "${params.fail}" ]]; then
+        head -c 1500000 /dev/urandom > ${meta.id}/partial.bam
+        echo 'EXITING because of fatal error' > ${meta.id}/Log.out
+        echo "simulated failure" >&2; exit 1
+    fi
     wc -c < fastqs/* > ${meta.id}/matrix.mtx
     rm -rf ${meta.id}/_STARtmp
     echo 'ALIGN: 1' > versions.yml

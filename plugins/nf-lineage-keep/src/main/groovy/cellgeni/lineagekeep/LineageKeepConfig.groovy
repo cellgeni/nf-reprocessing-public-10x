@@ -8,6 +8,7 @@ import nextflow.config.spec.ConfigScope
 import nextflow.config.spec.ScopeName
 import nextflow.script.dsl.Description
 import nextflow.util.Duration
+import nextflow.util.MemoryUnit
 
 @ScopeName('lineageKeep')
 @Description('''
@@ -37,9 +38,35 @@ class LineageKeepConfig implements ConfigScope {
 
     @ConfigOption
     @Description('''
-        Keep the work directories of failed attempts whose retry succeeded (default: `false`).
+        Keep the work directories of failed attempts whose retry succeeded when the task is
+        cleaned (default: `false`). Has no effect on attempts `cleanRetriedAttempts` emptied.
     ''')
     final boolean keepFailedAttempts
+
+    @ConfigOption
+    @Description('''
+        Empty an attempt that failed and will be retried as soon as it ends, instead of with
+        its task once the lineage is done (default: `false`). The directory itself stays: a
+        `-resume` only reaches attempt n+1's cache through attempt n's directory.
+    ''')
+    final boolean cleanRetriedAttempts
+
+    @ConfigOption
+    @Description('''
+        Empty every attempt of a task that failed for good -- ignored, aborted, or a barrier
+        (default: `false`). A `-resume` re-runs such a task in a new directory, so nothing in
+        them is reused. The task, its ancestors and its sample stay pinned; only the failed
+        task's own directories are emptied, and the directories themselves stay.
+    ''')
+    final boolean cleanFailedTasks
+
+    @ConfigOption
+    @Description('''
+        What survives `cleanRetriedAttempts` and `cleanFailedTasks`, besides the logs:
+        regular files smaller than this, and symlinks (default: `1 MB`). Keeps the small
+        reports a failure is debugged from, such as STAR's `Log.out` or a `chemistry.json`.
+    ''')
+    final MemoryUnit failedKeepBelow
 
     @ConfigOption
     @Description('''
@@ -109,6 +136,9 @@ class LineageKeepConfig implements ConfigScope {
         dryRun             = opts.dryRun == null ? true : opts.dryRun as boolean
         keepLogs           = opts.keepLogs == null ? true : opts.keepLogs as boolean
         keepFailedAttempts = opts.keepFailedAttempts as boolean
+        cleanRetriedAttempts = opts.cleanRetriedAttempts as boolean
+        cleanFailedTasks   = opts.cleanFailedTasks as boolean
+        failedKeepBelow    = opts.failedKeepBelow != null ? MemoryUnit.of(opts.failedKeepBelow.toString()) : MemoryUnit.of('1 MB')
         barrierProcesses   = stringList(opts.barrierProcesses)
         singleUseProcesses = stringList(opts.singleUseProcesses)
         scratch            = stringList(opts.scratch)

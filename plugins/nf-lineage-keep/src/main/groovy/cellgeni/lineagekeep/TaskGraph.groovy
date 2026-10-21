@@ -57,6 +57,8 @@ class TaskGraph {
         boolean pinned
         /** The work directory has been cleaned (held outputs aside). */
         boolean deleted
+        /** Attempt directories already emptied as failures, which the bulk clean skips. */
+        final Set<String> emptiedDirs = new HashSet<>()
 
         Node(String key, String process, String group) {
             this.key = key
@@ -204,6 +206,23 @@ class TaskGraph {
                 if( rerunKey(other) == rk ) pin(other)
         }
         pin(n)
+    }
+
+    /**
+     * The work directories to empty now that an attempt of `key` failed. With `retry` it is
+     * that attempt alone, when `cleanRetried`; otherwise the task failed for good and it is
+     * every attempt of it, when `cleanFailed`. Nothing reads a failed attempt's directory: it
+     * emitted no outputs, and a `-resume` re-runs it elsewhere. Pinning is not affected.
+     * Each directory is handed out once.
+     */
+    List<String> failedDirs(String key, String workDir, boolean retry, boolean cleanRetried, boolean cleanFailed) {
+        final n = nodes[key]
+        if( n == null )
+            return Collections.<String>emptyList()
+        final List<String> dirs = retry
+            ? (cleanRetried && workDir != null ? [workDir] : Collections.<String>emptyList())
+            : (cleanFailed ? n.attemptDirs : Collections.<String>emptyList())
+        return dirs.findAll { String d -> n.emptiedDirs.add(d) }
     }
 
     void published(String path) {
