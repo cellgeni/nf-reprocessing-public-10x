@@ -7,6 +7,7 @@ datasets="/path/to/datasets.tsv"
 [[ -e "$datasets" ]] || (echo "File $datasets not found" && false)
 
 nextflow run main.nf \
+    -profile sanger \
     --datasets "$datasets" \
     --outdir "results" \
     -resume

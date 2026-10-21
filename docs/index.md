@@ -1,57 +1,73 @@
-# Documentation
+---
+title: Home
+nav_order: 1
+---
 
-Reference material and accumulated operational knowledge for
-[nf-reprocessing-public-10x](https://github.com/cellgeni/nf-reprocessing-public-10x), a Nextflow
-pipeline that fetches public 10x datasets from GEO, SRA, ENA and ArrayExpress and reprocesses
-them uniformly with STARsolo or Cell Ranger.
+# nf-reprocessing-public-10x
 
-For installation and parameters, see the [README](../README.md). These pages cover what the
-README cannot: what public data does when you run it at scale.
+nf-reprocessing-public-10x fetches public 10x single-cell datasets from GEO, SRA, ENA or
+ArrayExpress and reprocesses them uniformly. Give it a table of series and samples; it reads the
+archive metadata, downloads whatever the submitters deposited (FASTQ, 10x BAM or `.sra`),
+normalises it to Cell Ranger FASTQ naming, infers the chemistry from the reads themselves, and
+aligns with STARsolo or Cell Ranger. One run report covers every sample.
 
-## Pages
+```
+datasets.tsv ──► archive metadata ──► FASTQ / BAM / SRA ──► Cell Ranger naming ──► chemistry
+                 (FETCH10XMETA)        (download, convert)    (per run, per sample)  inference
+                                                                                        │
+                       run report ◄── run tables ◄── STARsolo / Cell Ranger ◄──────────┘
+                       (MultiQC)      (COLLATE)       (per species)
+```
+
+## Quick start
+
+On the Sanger farm:
+
+```bash
+module load cellgen/nextflow/26.04.6
+
+nextflow run main.nf -profile sanger \
+  --datasets datasets.tsv --default_specie human --starsolo
+```
+
+Anywhere else, choose a container engine and pass the references, which only `-profile sanger`
+provides (see [Profiles and running elsewhere](guides/profiles.md)):
+
+```bash
+nextflow run main.nf -profile docker \
+  --datasets datasets.tsv --default_specie human --starsolo \
+  --wl_basedir whitelists --star_human_reference /path/to/star/GRCh38
+```
+
+`datasets.tsv` is tab-separated, one row per series:
+
+```
+dataset_id	sample_id
+GSE230685	GSM7232572,GSM7232573
+PRJEB37166	ERS4605100,ERS4605101
+```
+
+Results go to `results/`: STARsolo output per dataset in `results/starsolo/`, run tables at the
+top level and the run report in `results/multiqc/`.
+
+{: .warning }
+An empty `sample_id` processes the **whole series**. Run with `--metaonly` first to see what a
+series holds — see [Datasets table](reference/datasets.md).
+
+## Where next
 
 | Page | Read it when |
 |---|---|
-| [10x chemistry reference](10x_chemistry_reference.md) | You need to know what a set of FASTQs actually is — which whitelist implies which chemistry, what read geometry each layout has, and which layouts must be rejected from a gene-expression path rather than guessed at |
-| [Archive pathologies](archive-pathologies.md) | A dataset failed and you want to know whether it is a known problem, or you are about to conclude that a public submission is broken |
-| [Reporting upstream](reporting-upstream.md) | You have confirmed a defect in a public submission and want to send it to GEO, SRA, ENA or ArrayExpress |
-| [Failure modes](failure-modes.md) | You want to know what a given exit code means, what usually fails and why, or which problems are known and open |
-| [tchem on our runs](tchem-benchmark.md) | You are deciding whether to use TusslChemistry (`tchem`), or its library-type and strand signals, beside our own chemistry inference. It records what tchem 0.1.0 did on 1,227 runs whose outcome we already knew |
-| [Post-mortems](post-mortems.md) | You want to read the write-up of a past run — what failed, how much of it was the data and how much was us. Links to every published report |
-
-## Why these pages exist
-
-Public data is the hard part of this pipeline. The aligners are well understood and the failures
-are rarely in them: they are in submissions that are mislabelled, internally inconsistent,
-missing files, or perfectly correct but not what we assumed. The same small set of problems
-recurs across batches, each one invisible until something several stages downstream fails
-wearing an unrelated message.
-
-Three habits are worth carrying into any use of these pages, because each one has been paid for:
-
-- **Measure, do not infer — while you still can.** Several confident conclusions drawn from logs
-  turned out to be wrong when checked against the FASTQs, because a failure routinely surfaces
-  two stages after its cause. Work directories persist only until someone deletes them: batch 4
-  was collected after its had gone, and all 47 of its failures now read `(no .command.log
-  found)` — the counts survived in the trace, the reasons did not. Collect and archive a run
-  while its work dirs still exist.
-- **Aggregate by dataset before concluding anything.** Failures concentrate — one dataset was
-  48% of a run's 1814 failures. A flat accession list hides that.
-- **Separate "the data is broken" from "we did not check".** Most rejected volume in a typical
-  run is correctly labelled data that we downloaded without reading its metadata. Confusing the
-  two produces upstream reports that are wrong on their face and hides real pipeline bugs.
-
-## For maintainers
-
-Debugging a specific run — collecting its logs, classifying failures, attributing them to
-datasets, verifying a chemistry claim against a work directory, writing the post-mortem — is
-covered by the `reprocess-debug` skill in
-[`.claude/skills/reprocess-debug/`](../.claude/skills/reprocess-debug/), which ships with the
-repository. `CLAUDE.md` at the repository root describes the pipeline's architecture and the
-traps in its channel wiring.
-
-Complete records of past runs — the Nextflow trace, per-task tool stderr, execution reports and
-the triage manifest — are archived on the Sanger farm at
-`/nfs/cellgeni/reprocessing-runs/`, one directory per run. The readable write-up of each is
-published as a browser-accessible page and indexed in [Post-mortems](post-mortems.md); the
-farm archive is the durable copy, that index is where the links live.
+| [Getting started](getting-started.md) | You are running the pipeline for the first time |
+| [Profiles and running elsewhere](guides/profiles.md) | You are choosing a profile, or running outside the Sanger farm |
+| [Resources and queues](guides/resources.md) | You want to know what each task asks for, or tune it for your machine |
+| [Species](guides/species.md) | Samples were skipped for want of a species, or the metadata names the wrong one |
+| [Chemistry inference](guides/chemistry.md) | You want to know how the chemistry is decided, or why a run was rejected |
+| [Reruns and cleanup](guides/reruns.md) | A run stopped part-way, or you want the work dirs cleaned as it goes |
+| [Parameters](reference/parameters.md) | You need the full list of parameters and what each accepts |
+| [Outputs](reference/outputs.md) | You want to know what each output file is |
+| [Run report](reference/run-report.md) | You are reading the MultiQC report and want to know where to look |
+| [Troubleshooting](troubleshooting.md) | Something failed with an error message |
+| [Knowledge base](knowledge-base.md) | A public dataset misbehaved and you want to know whether it is a known problem |
+| [Developers](developers.md) | You are changing the pipeline or its modules |
+| [Changelog](changelog.md) | You want to know what changed between releases |

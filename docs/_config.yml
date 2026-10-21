@@ -1,28 +1,67 @@
-# GitHub Pages configuration for the docs/ knowledge base.
-# Source is set in Settings -> Pages to "Deploy from a branch": main, /docs.
+# GitHub Pages configuration for the nf-reprocessing-public-10x documentation.
+# Source is set in Settings -> Pages to "Deploy from a branch": main, /docs. Only main is
+# published: a page merged to dev appears on the site with the next release.
 
-# Primer is GitHub's own documentation styling: no hero banner, and tables and
-# code blocks that hold up under the wide ones in archive-pathologies.md. The
-# alternatives are worse fits here — cayman opens every page with a large
-# gradient header, and minimal spends a fixed sidebar on width these tables need.
-theme: jekyll-theme-primer
+# Just the Docs, as in nf-cellbender: a sidebar, search and callouts with no build step of
+# our own. GitHub Pages fetches the theme through jekyll-remote-theme; pinned so a theme
+# release cannot change the site under us.
+remote_theme: just-the-docs/just-the-docs@v0.10.1
+plugins:
+  - jekyll-remote-theme
+  - jekyll-include-cache   # needed by the theme
+  - jekyll-relative-links  # links between pages are written as page.md
 
 title: nf-reprocessing-public-10x
-description: Operational knowledge for loading and reprocessing public 10x datasets
+description: Fetch public 10x datasets from GEO, SRA, ENA or ArrayExpress and reprocess them uniformly
+url: https://cellgeni.github.io
+baseurl: /nf-reprocessing-public-10x
 
-# The pages are plain Markdown with no front matter. GitHub Pages enables
-# jekyll-optional-front-matter, so they are still built as pages — but without a
-# layout they render unstyled, outside the theme. This applies the theme's
-# default layout to all of them, so no page needs front matter added.
+# No `permalink: pretty` (nf-cellbender has it): the knowledge-base pages have been public
+# as /archive-pathologies.html and so on, and upstream reports, post-mortems and messages
+# link there. Default permalinks keep every one of those URLs; for the same reason those
+# pages stay at the root of docs/ and are grouped in the sidebar by `parent:` only.
+
+search_enabled: true
+heading_anchors: true
+
+aux_links:
+  "nf-reprocessing-public-10x on GitHub":
+    - "https://github.com/cellgeni/nf-reprocessing-public-10x"
+aux_links_new_tab: true
+
+back_to_top: true
+back_to_top_text: "Back to top"
+
+gh_edit_link: true
+gh_edit_link_text: "Edit this page on GitHub"
+gh_edit_repository: "https://github.com/cellgeni/nf-reprocessing-public-10x"
+gh_edit_branch: "main"
+gh_edit_source: docs
+gh_edit_view_mode: "tree"
+
+# Callouts used across the pages: {: .note }, {: .warning }, {: .important }
+callouts:
+  note:
+    color: blue
+  important:
+    title: Important
+    color: yellow
+  warning:
+    color: red
+
+# GitHub Pages would pick the theme's default layout on its own (jekyll-default-layout);
+# setting it here makes local builds match and keeps pages free of a layout line
 defaults:
   - scope:
       path: ""
     values:
       layout: default
 
-# Insurance only: both files are gitignored (docs/agent_debug*.md), so they are
-# not on main and Pages builds from the branch, not a working tree. This keeps
-# them out if one is ever force-added.
+# Tooling, not pages. The agent_debug files are gitignored (docs/agent_debug*.md), so they
+# are never on main; this keeps them out if one is ever force-added.
 exclude:
+  - _scripts
+  - Gemfile
+  - Gemfile.lock
   - agent_debug.md
   - agent_debug.superseded.md

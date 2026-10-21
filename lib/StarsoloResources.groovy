@@ -7,7 +7,9 @@ import java.util.zip.GZIPInputStream
 /**
  * STARsolo memory, run limit and queue predicted from the sample's input. plan() runs in
  * subworkflows/local/starsolo10x and its result travels in `meta.resources`, which the
- * `memory`, `time` and `queue` closures in configs/starsolo10x.config read.
+ * `memory` and `time` closures in configs/starsolo10x.config read. The queue list is no
+ * longer read: configs/sanger.config derives the same queue from the time, and the list
+ * stays only because dropping it would change meta.resources and every STARsolo task hash.
  *
  * Peak memory and runtime both grow with STAR's input read count. Nothing upstream knows that
  * count, so it is estimated from the R2 files: the head of each is streamed through gunzip, which gives

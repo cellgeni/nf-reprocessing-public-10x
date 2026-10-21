@@ -1,5 +1,7 @@
 process SRA2FASTQ {
     tag "${meta.id}"
+    label 'process_high'
+    label 'process_long'
 
     container "quay.io/cellgeni/reprocess_10x:latest"
 

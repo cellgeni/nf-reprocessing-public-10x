@@ -1,5 +1,6 @@
 process REPROCESS10X_RUNREPORT {
     tag "run report"
+    label 'process_single'
 
     // MultiQC ships its own python3, which the stdlib-only run_report.py runs on
     container "quay.io/biocontainers/multiqc:1.35--pyhdfd78af_2"
