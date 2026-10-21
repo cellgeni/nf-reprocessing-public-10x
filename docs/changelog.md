@@ -14,7 +14,10 @@ have the full notes for each.
 1. TOC
 {:toc}
 
-## Unreleased
+## 26-294 — 2026-10-21
+
+Runs anywhere: `docker`, `singularity` and `sanger` profiles, resources by label, launch checks,
+and this documentation site.
 
 ### Added
 - **`docker`, `singularity` and `sanger` profiles.** The pipeline runs outside the Sanger farm:
@@ -38,6 +41,16 @@ have the full notes for each.
 - Every task now asks for an explicit run limit. The values match the limits of the queues the
   tasks used before (12 h, 48 h), so the farm routes exactly as it did.
 - The reference parameters have no defaults outside `-profile sanger`.
+- **nf-lineage-keep 0.2.0, live.** `dryRun = false` is now spelled out — a missing `dryRun`
+  means `true`, which is how batches 26-27 filled the quota. Failed attempts are emptied as they
+  end (`cleanRetriedAttempts`, `cleanFailedTasks`), keeping logs, symlinks and files under 1 MB;
+  their directories stay, since `-resume` reaches a later attempt's cache through them. Install
+  0.2.0 (`make install` in `plugins/nf-lineage-keep`) before running `-profile lineage_keep`.
+
+### Fixed
+- `WGET10X` percent-encodes `#` in URLs. ENA serves submitter file names verbatim, and
+  PRJEB71931's `NSCLC#7_…` reached the server truncated at the `#`, losing the whole dataset in
+  batch 27.
 
 ## 26-292 — 2026-10-19
 
