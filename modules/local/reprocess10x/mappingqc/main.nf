@@ -1,5 +1,6 @@
 process REPROCESS10X_MAPPINGQC {
     tag "Collecting QC stats for ${meta.id}"
+    label 'process_single'
 
     container "quay.io/cellgeni/starsolo:v4.1"
 

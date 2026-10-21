@@ -91,41 +91,40 @@
             "title": "Reference options",
             "type": "object",
             "fa_icon": "fas fa-book",
+            "description": "-profile sanger sets all five to the farm's copies; anywhere else pass the ones you need.",
             "properties": {
                 "wl_basedir": {
                     "type": "string",
                     "format": "directory-path",
                     "exists": true,
-                    "default": "/nfs/cellgeni/STAR/whitelists",
-                    "description": "Directory of 10x barcode whitelists.",
+                    "description": "Directory of 10x barcode whitelists, read by chemistry inference. Required unless --metaonly.",
+                    "help_text": "Needs the 10x whitelists under their Cell Ranger names (737K-august-2016.txt, 3M-february-2018.txt, ...; see docs/10x_chemistry_reference.md). The STARsolo image ships them: `docker run --rm -u $(id -u):$(id -g) -v $PWD:/out quay.io/cellgeni/starsolo:v4.4 cp -r /opt/STARsolo/data/whitelists /out/`.",
                     "fa_icon": "fas fa-list"
                 },
                 "star_human_reference": {
                     "type": "string",
                     "format": "directory-path",
-                    "default": "/nfs/cellgeni/STAR/human/2020A/index",
-                    "description": "STAR index for human samples.",
+                    "description": "STAR index for human samples. --starsolo needs this or --star_mouse_reference.",
+                    "help_text": "A genomeGenerate directory compatible with STAR 2.7.10a, the version in quay.io/cellgeni/starsolo:v4.4. The farm's is built from Cell Ranger's GRCh38 2020-A.",
                     "fa_icon": "fas fa-book"
                 },
                 "star_mouse_reference": {
                     "type": "string",
                     "format": "directory-path",
-                    "default": "/nfs/cellgeni/STAR/mouse/2020A/index",
-                    "description": "STAR index for mouse samples.",
+                    "description": "STAR index for mouse samples. --starsolo needs this or --star_human_reference.",
+                    "help_text": "A genomeGenerate directory compatible with STAR 2.7.10a, the version in quay.io/cellgeni/starsolo:v4.4. The farm's is built from Cell Ranger's mm10 2020-A.",
                     "fa_icon": "fas fa-book"
                 },
                 "cr_human_reference": {
                     "type": "string",
                     "format": "directory-path",
-                    "default": "/software/cellgen/cellgeni/refdata_10x/refdata-cellranger-arc-GRCh38-2020-A-2.0.0",
-                    "description": "Cell Ranger reference for human samples.",
+                    "description": "Cell Ranger reference for human samples. --cellranger needs this or --cr_mouse_reference.",
                     "fa_icon": "fas fa-book"
                 },
                 "cr_mouse_reference": {
                     "type": "string",
                     "format": "directory-path",
-                    "default": "/software/cellgen/cellgeni/refdata_10x/refdata-cellranger-arc-mm10-2020-A-2.0.0",
-                    "description": "Cell Ranger reference for mouse samples.",
+                    "description": "Cell Ranger reference for mouse samples. --cellranger needs this or --cr_human_reference.",
                     "fa_icon": "fas fa-book"
                 }
             }

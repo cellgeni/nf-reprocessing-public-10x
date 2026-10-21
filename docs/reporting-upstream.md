@@ -1,3 +1,9 @@
+---
+title: Reporting upstream
+parent: Knowledge base
+nav_order: 2
+---
+
 # Reporting a defect upstream
 
 When reprocessing turns up something genuinely wrong in a public submission, the finding is

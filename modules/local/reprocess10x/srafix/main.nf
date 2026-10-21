@@ -18,6 +18,7 @@ process REPROCESS10X_SRAFIX {
     // READ and QUALITY must be as long as its READ_LEN says, and every mate file must hold one
     // record per spot (a zero-length segment would drop records from one mate only).
     tag "${meta.id}"
+    label 'process_high'
 
     container "quay.io/cellgeni/reprocess_10x:latest"
 

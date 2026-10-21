@@ -4,6 +4,8 @@
 
 process FETCH10XMETA {
     tag "${meta.id}"
+    label 'process_single'
+    label 'process_network'
 
     input:
     tuple val(meta), val(sample_ids)

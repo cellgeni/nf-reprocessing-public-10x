@@ -51,6 +51,8 @@ def helpAfter() {
     ├── samples.tsv                 Per-sample resolved species, chemistry and run origins
     ├── run_chemistry.tsv           Per-run chemistry inference and read lengths
     └── skipped_samples.tsv         Samples dropped for want of a species (absent if none)
+
+    Documentation: https://cellgeni.github.io/nf-reprocessing-public-10x/
     """.stripIndent()
 }
 
@@ -73,6 +75,18 @@ def alignerIndexRow(Map meta) {
         chemistry : meta.chemistry ?: '',  // Cell Ranger --chemistry
         wl        : meta.wl ?: '',         // STARsolo --wl
     ]
+}
+
+// An aligner needs a reference for at least one species; a species without one is not aligned.
+def checkReferences(String flag, String prefix, Object human, Object mouse) {
+    if (!human && !mouse) {
+        log.error("${flag} needs --${prefix}_human_reference and/or --${prefix}_mouse_reference.")
+        System.exit(1)
+    }
+    if (!human || !mouse) {
+        def species = human ? 'mouse' : 'human'
+        log.warn("${flag}: no --${prefix}_${species}_reference, so ${species} samples will not be aligned.")
+    }
 }
 
 workflow {
@@ -98,6 +112,24 @@ workflow {
     if (params.no_infer_specie && !params.default_specie) {
         log.error("When --no_infer_specie is set, --default_specie must be provided.")
         System.exit(1)
+    }
+
+    // Outside -profile sanger nothing supplies an engine or the references. Each of these
+    // used to be a silent no-op instead: a missing reference becomes channel.empty() below,
+    // which never fires the process that waits on it, and the run exits 0.
+    if (!workflow.containerEngine) {
+        log.error("No container engine: run with -profile sanger, singularity or docker. Every step but the metadata fetch runs in an image.")
+        System.exit(1)
+    }
+    if (!params.metaonly && !params.wl_basedir) {
+        log.error("--wl_basedir is required to infer chemistry. The STARsolo image ships one: copy /opt/STARsolo/data/whitelists out of quay.io/cellgeni/starsolo:v4.4 (https://cellgeni.github.io/nf-reprocessing-public-10x/guides/profiles.html#whitelists).")
+        System.exit(1)
+    }
+    if (params.starsolo && !params.metaonly) {
+        checkReferences('--starsolo', 'star', params.star_human_reference, params.star_mouse_reference)
+    }
+    if (params.cellranger && !params.metaonly) {
+        checkReferences('--cellranger', 'cr', params.cr_human_reference, params.cr_mouse_reference)
     }
 
     // Load files

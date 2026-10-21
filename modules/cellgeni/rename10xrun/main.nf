@@ -4,6 +4,7 @@
 
 process RENAME10XRUN {
     tag "${meta.id}"
+    label 'process_single'
     container "quay.io/cellgeni/metacells-python:latest"
 
     input:

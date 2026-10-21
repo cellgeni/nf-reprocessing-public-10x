@@ -7,12 +7,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A Nextflow DSL2 pipeline that loads and reprocesses public 10x datasets from GEO, SRA, ENA
 or ArrayExpress: fetch metadata → download (FASTQ / BAM / SRA) → normalise to Cell Ranger
 FASTQ naming → align with STARsolo or Cell Ranger. It runs on the Sanger farm via LSF and
-Singularity; [nextflow.config](nextflow.config) hard-codes farm paths for whitelists,
-references and the Singularity cache.
+Singularity with `-profile sanger` ([configs/sanger.config](configs/sanger.config) holds the farm
+paths for whitelists, references and the Singularity cache), and elsewhere with `-profile
+docker` or `singularity`.
 
-[README.md](README.md) has the user-facing parameter table, input format and output layout.
-Most of the accumulated operational knowledge lives in two places, both worth reading before
-any non-trivial change:
+User documentation is the site built from [docs/](docs/)
+(<https://cellgeni.github.io/nf-reprocessing-public-10x/>): getting started, guides, reference
+(parameters, datasets table, outputs, run report), troubleshooting, developers, changelog. It
+is canonical; [README.md](README.md) is only an overview and links. Most of the accumulated
+operational knowledge lives in two places, both worth reading before any non-trivial change:
 
 - [.claude/skills/reprocess-debug/](.claude/skills/reprocess-debug/) — the `reprocess-debug`
   skill: collecting a finished run's logs (`bin/collect_run_logs.sh`), classifying and
@@ -23,7 +26,7 @@ any non-trivial change:
   but not fixed. Also `references/run-index.md` — every run's name, session, archive path and
   failure counts, so none of that has to be hunted for. Supersedes the old `docs/agent_debug.md`,
   which stays untracked and local.
-- [docs/](docs/) — the user-facing knowledge base, tracked and browsable on GitHub:
+- [docs/](docs/) — the site's knowledge-base section, tracked and browsable on GitHub:
   [`archive-pathologies.md`](docs/archive-pathologies.md) (per-accession defects found in public
   submissions, and the separate list of correctly-labelled data we rejected late),
   [`reporting-upstream.md`](docs/reporting-upstream.md) (how to report one to GEO/SRA/ENA),
@@ -37,6 +40,14 @@ any non-trivial change:
   `layout_only` vs unique, and which layouts (ATAC, feature-barcode, V(D)J, Flex) must be
   rejected from a GEX path rather than guessed at.
 
+The site is Just the Docs, built by GitHub Pages from `main:/docs` only — a docs change shows
+up with the next release, not on merge to `dev`. Pages carry front matter (`title`, `parent`,
+`nav_order`) for the sidebar; link between them as `page.md`, and to anything outside `docs/`
+with a full GitHub URL. **Never move or rename the knowledge-base pages, and never switch on
+`permalink: pretty`**: their `.html` URLs are linked from upstream reports and post-mortems.
+[docs/developers.md](docs/developers.md) is the user-facing version of this file's architecture
+notes; keep the two consistent when either changes.
+
 ## Commands
 
 Nextflow version matters: the manifest requires `>=26.04.1` and the farm default on PATH is
@@ -46,10 +57,10 @@ Nextflow version matters: the manifest requires `>=26.04.1` and the farm default
 module load cellgen/nextflow/26.04.6
 
 # a run (the usual route is bsub — see scripts/run_reprocess.bsub for the live invocation)
-nextflow run main.nf --datasets data/tables/batches/batch6.csv \
+nextflow run main.nf -profile sanger --datasets data/tables/batches/batch6.csv \
   --outdir results/batch6 --default_specie human --starsolo -ansi-log false
 
-bsub < scripts/run_reprocess.bsub     # edit the nextflow line in the script first
+bsub < scripts/run_reprocess.bsub     # edit the nextflow line in the script first; it runs -profile sanger,lineage_keep
 ```
 
 Tests (nf-test, live network — needs a head node or the `transfer` queue):
@@ -99,8 +110,16 @@ The trace path is rebuilt in `main.nf` from `params.trace_report_suffix` — kee
 
 `modules/cellgeni/*` are registry modules (imported bare, e.g. `from 'cellgeni/fetch10xmeta'`,
 and carrying a `.module-info` checksum); `modules/local/*` are repo-local and imported by
-relative path. Per-process resources live one-file-per-process in [configs/](configs/), each
-wired in by an `includeConfig` line at the bottom of `nextflow.config`.
+relative path.
+
+Resources follow nf-core: every live module carries a `label` (`process_single`,
+`process_high`, `process_long`, and the custom `process_network` for the two tasks that talk
+HTTP), [configs/base.config](configs/base.config) turns labels into cpus/memory/time, and
+`configs/<process>.config` holds only what a label cannot say (ext.args, retries, odd memory
+rules). Each is wired in by an `includeConfig` line in `nextflow.config`, `base.config` first.
+Nothing outside [configs/sanger.config](configs/sanger.config) names an executor or a queue:
+that profile picks the queue from the resolved `task.memory`/`task.time`, the way an nf-core
+institutional profile does, so a new process needs a label and a time, never a queue line.
 
 ### The load-bearing ideas
 
@@ -136,7 +155,9 @@ would split a sample into two STARsolo dirs that then collide in MAPPINGQC.
 `StarsoloResources.plan()` ([lib/StarsoloResources.groovy](lib/StarsoloResources.groovy)) once per
 sample: reads are estimated from the head of each R2 FASTQ, and per-attempt lists of memory,
 hours and queue come back; `configs/starsolo10x.config` only indexes them with `task.attempt - 1`
-and falls back to the old 128/256/384 GB ladder on `long` when `plan()` returned null. The
+and falls back to the old 128/256/384 GB ladder at 48 h when `plan()` returned null. The `queue`
+list is no longer read (sanger.config derives the same answer from the hours) but stays, since
+dropping it would change `meta.resources` and so every STARsolo task hash. The
 coefficients are fitted in [notebooks/resource_prediction.ipynb](notebooks/resource_prediction.ipynb)
 (§10 prints them); refit there, don't hand-tune the class.
 
@@ -157,6 +178,16 @@ leading slash, so they match at **any** depth. A `.tsv` or `.json` anywhere, inc
 `docs/agent_debug*.md`, so the knowledge base can live there. `.claude/` was never ignored —
 the skill was simply untracked until it was committed; only `.claude/settings.local.json` is
 excluded.
+
+**Every farm run needs `-profile sanger`** — `-profile sanger,lineage_keep` for the batch
+scripts, and on every `-resume` too. Without it the base config runs `local` with no container
+engine and no references; `main.nf` refuses to start in that state rather than run tasks inside
+the 4 GB driver job. Other guards there stop a run missing `--wl_basedir`, or `--starsolo` with
+no STAR reference, which used to exit 0 having done nothing (an unset reference is an empty
+channel). Docker cannot pull the `docker://` image name the STARsolo registry module uses, so
+the `docker` profile overrides that container by name; the Singularity name is left alone so its
+task hashes stay put. A `label` line is a directive, not script, so adding one does not
+change a task hash.
 
 **Every task retries once regardless of exit code, and that is deliberate.** The
 `errorStrategy` in `nextflow.config` reads `task.attempt == 1 || (exitStatus in [...] && attempt
@@ -213,7 +244,10 @@ that key changed STARsolo's task hash, so a pre-2026-10 batch re-runs STARsolo o
 
 **`nextflow_schema.json` is tracked only through a `!/nextflow_schema.json` exception** to the
 `*.json` rule in `.gitignore`. New parameters go in the schema as well as `nextflow.config`'s
-`params {}`, or `validateParameters()` warns about them and `--help` omits them.
+`params {}`, or `validateParameters()` warns about them and `--help` omits them. After any schema
+change, regenerate `docs/reference/parameters.md` with `python3 docs/_scripts/schema_to_md.py`
+(never edit that page by hand); a new cross-parameter check in `main.nf` also goes in the
+script's `MAIN_NF_RULES`.
 
 **MultiQC needs a `TMPDIR` inside the work dir.** It builds `multiqc_data/` in `TMPDIR` and copies
 it across with its modes, dropping the work dir's setgid bit, so files land in the user's primary
@@ -246,7 +280,8 @@ Whitelists `/nfs/cellgeni/STAR/whitelists`, STAR references
 `/nfs/cellgeni/STAR/{human,mouse}/2020A/index`, Cell Ranger references
 `/software/cellgen/cellgeni/refdata_10x/`, Singularity cache
 `/nfs/cellgeni/singularity/images/`. Use these directly — `find /` will exceed the tool
-timeout.
+timeout. They are set by `configs/sanger.config` and nowhere else; the base config leaves the
+references null.
 
 Finished runs are archived to `/nfs/cellgeni/reprocessing-runs/batch<N>/<run_name>/` by
 `bin/archive_run.sh` — tool stderr, manifests, trace, Nextflow reports, LSF driver logs, each

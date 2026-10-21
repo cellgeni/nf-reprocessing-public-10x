@@ -4,6 +4,7 @@
 
 process STARSOLO10X {
     tag "${meta.id}"
+    label 'process_high'
     // v4.3 is the first wrapper release with `--wl` and `--skip-length-checks`.
     container "docker://quay.io/cellgeni/starsolo:v4.4"
     
