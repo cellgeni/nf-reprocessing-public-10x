@@ -23,6 +23,12 @@ process WGET10X {
     def prefix = "${meta.id}"
     def verify = task.ext.verify_downloads == null ? true : task.ext.verify_downloads
     def tries  = task.ext.dl_tries ?: 6
+    // ENA serves submitter file names verbatim, and '#' is a URL fragment delimiter:
+    // PRJEB71931's "NSCLC#7_..._I1_001.fastq.gz" reached the server as ".../NSCLC"
+    // and 404'd on every attempt, losing the whole dataset in batch 27. Percent-
+    // encode it. The tag keeps the file name as listed; the messages show the URL
+    // actually requested.
+    def url    = link.toString().trim().replace('#', '%23')
     """
     # An empty URL reaches wget as no argument at all, which makes it print its
     # usage and exit 1 — an opaque failure for what is really a metadata gap.
@@ -39,7 +45,7 @@ process WGET10X {
     if (( ${task.attempt} > 1 ))
     then
         backoff=\$(( 30 * (${task.attempt} - 1) * (${task.attempt} - 1) ))
-        echo "Attempt ${task.attempt}: waiting \${backoff}s before retrying $link" >&2
+        echo "Attempt ${task.attempt}: waiting \${backoff}s before retrying $url" >&2
         sleep "\$backoff"
     fi
 
@@ -61,7 +67,7 @@ process WGET10X {
     for attempt in \$(seq 1 ${tries})
     do
         rc=0
-        wget $args --continue $link || rc=\$?
+        wget $args --continue $url || rc=\$?
         if (( rc == 0 ))
         then
             break
@@ -69,13 +75,13 @@ process WGET10X {
         if (( attempt < ${tries} ))
         then
             pause=\$(( 20 * attempt ))
-            echo "NOTE: wget exited \$rc on in-job attempt \$attempt/${tries} for $link; resuming in \${pause}s" >&2
+            echo "NOTE: wget exited \$rc on in-job attempt \$attempt/${tries} for $url; resuming in \${pause}s" >&2
             sleep "\$pause"
         fi
     done
     if (( rc != 0 ))
     then
-        echo "ERROR: download of $link did not complete after ${tries} in-job attempts (last wget exit \$rc)." >&2
+        echo "ERROR: download of $url did not complete after ${tries} in-job attempts (last wget exit \$rc)." >&2
         echo "       Partial data is left in the work dir; the run was not passed downstream." >&2
         exit 4
     fi
@@ -85,13 +91,13 @@ process WGET10X {
     mapfile -t downloaded < <(find . -maxdepth 1 -type f ! -name '.*' ! -name 'versions.yml' -printf '%f\\n')
     if (( \${#downloaded[@]} != 1 ))
     then
-        echo "ERROR: expected exactly 1 file from $link, found \${#downloaded[@]}: \${downloaded[*]:-none}" >&2
+        echo "ERROR: expected exactly 1 file from $url, found \${#downloaded[@]}: \${downloaded[*]:-none}" >&2
         exit 1
     fi
     got=\${downloaded[0]}
     if [[ ! -s "\$got" ]]
     then
-        echo "ERROR: \$got downloaded from $link is empty" >&2
+        echo "ERROR: \$got downloaded from $url is empty" >&2
         exit 1
     fi
 
@@ -122,13 +128,13 @@ process WGET10X {
         # A bad archive after a resumed transfer is most likely a bad splice, so
         # discard it and fetch the whole file once, cleanly. Only a second failure
         # means the source itself is serving corrupt data.
-        echo "NOTE: \$got failed its integrity check; discarding it and refetching $link from scratch." >&2
+        echo "NOTE: \$got failed its integrity check; discarding it and refetching $url from scratch." >&2
         cat gzip_test.err >&2
         rm -f "\$got" gzip_test.err
-        wget $args $link
+        wget $args $url
         if ! archive_ok "\$got"
         then
-            echo "ERROR: \$got is not a valid archive; the download from $link is corrupt or truncated." >&2
+            echo "ERROR: \$got is not a valid archive; the download from $url is corrupt or truncated." >&2
             echo "       This failed on a clean full download as well as a resumed one." >&2
             cat gzip_test.err >&2
             exit 1
