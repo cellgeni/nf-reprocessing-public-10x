@@ -1,5 +1,6 @@
 process REPROCESS10X_COLLATE {
     tag "run tables"
+    label 'process_single'
 
     // A biocontainer: Nextflow needs `ps` inside the image for task metrics, which python:*-slim lacks
     container "quay.io/biocontainers/python:3.12.12"

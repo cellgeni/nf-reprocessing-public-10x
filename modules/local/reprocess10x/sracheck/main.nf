@@ -15,6 +15,7 @@ process REPROCESS10X_SRACHECK {
     // Anything else, including a check that itself fails, is `ok`: the step may only ever add
     // a way through, never take one away.
     tag "${meta.id}"
+    label 'process_single'
 
     container "quay.io/cellgeni/reprocess_10x:latest"
 

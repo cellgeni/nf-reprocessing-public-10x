@@ -1,6 +1,7 @@
 process CELLRANGER_COUNT {
     tag "$meta.id"
     label 'process_high'
+    label 'process_long'
     container "quay.io/nf-core/cellranger:9.0.1"
 
     input:

@@ -6,6 +6,8 @@ process WGET10X {
     // and avoids spaces — a space is what made the block-splitter regex in
     // docs/agent_debug.md drop every WGET10X failure it was asked to read.
     tag "${meta.id}:${(link?.toString()?.trim()?.tokenize('/') ?: ['no-url'])[-1]}"
+    label 'process_single'
+    label 'process_network'
 
     container "quay.io/cellgeni/reprocess_10x:latest"
 

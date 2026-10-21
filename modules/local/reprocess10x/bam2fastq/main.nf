@@ -1,6 +1,6 @@
 process REPROCESS10X_BAM2FASTQ {
     tag "Converting .bam file to .fastq for $meta.id"
-    cpus 16
+    label 'process_high'
 
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'docker://quay.io/cellgeni/reprocess_10x:latest':
