@@ -109,7 +109,12 @@ class LineageKeepObserver implements TraceObserverV2 {
             }
             scratch << new Tuple2<Pattern,String>(LineageKeepConfig.wildcard(spec.substring(0, i)), spec.substring(i + 1))
         }
-        log.info "[nf-lineage-keep] ${config.dryRun ? 'DRY RUN -- nothing will be deleted' : 'deleting'}; log: ${outDir.resolve('deleted.tsv')}"
+        log.info "[nf-lineage-keep] ${config.dryRun ? 'DRY RUN -- nothing will be deleted' : 'deleting'}; " +
+            "retried attempts: ${config.cleanRetriedAttempts ? 'emptied' : 'kept'}, failed tasks: ${config.cleanFailedTasks ? 'emptied' : 'kept'}" +
+            "${config.cleanRetriedAttempts || config.cleanFailedTasks ? " (files under ${config.failedKeepBelow} kept)" : ''}; " +
+            "log: ${outDir.resolve('deleted.tsv')}"
+        if( config.keepFailedAttempts && config.cleanRetriedAttempts )
+            log.warn "[nf-lineage-keep] keepFailedAttempts has no effect on attempts that cleanRetriedAttempts already emptied"
     }
 
     @Override
@@ -214,6 +219,25 @@ class LineageKeepObserver implements TraceObserverV2 {
             graph.succeeded(info.key, info.outputs, info.publishable)
         else if( !info.retry )
             graph.failed(info.key, info.exit)
+        if( !info.success )
+            emptyFailed(info)
+    }
+
+    /**
+     * cleanRetriedAttempts / cleanFailedTasks. The directories are emptied, never removed:
+     * on `-resume` Nextflow walks a task's attempt hashes in order and moves on to attempt
+     * n+1 only while attempt n's directory exists, so a missing one would re-run a task whose
+     * retry succeeded, and everything downstream of it.
+     */
+    private void emptyFailed(TaskInfo info) {
+        final dirs = graph.failedDirs(info.key, info.workDir, info.retry, config.cleanRetriedAttempts, config.cleanFailedTasks)
+        final kind = info.retry ? 'retried' : 'failed'
+        for( String d : dirs ) {
+            final dir = Path.of(d)
+            // an earlier attempt has its own hash, which is its directory
+            final hash = "${dir.parent.fileName}${dir.fileName}".toString()
+            cleaner.cleanFailed(dir, config.failedKeepBelow.toBytes(), kind, info.process, info.name, hash)
+        }
     }
 
     private void purgeScratch(TaskInfo info) {
@@ -238,8 +262,10 @@ class LineageKeepObserver implements TraceObserverV2 {
                 continue
             }
             final dirs = config.keepFailedAttempts ? [n.workDir] : n.attemptDirs
-            for( String d : dirs )
+            for( String d : dirs ) {
+                if( d in n.emptiedDirs ) continue
                 cleaner.clean(Path.of(d), c.paths, n.process, n.name, n.hash)
+            }
         }
         for( TaskGraph.Node n : graph.pinnedAfterDelete )
             log.warn "[nf-lineage-keep] ${n.name} was deleted before a failure downstream pinned it -- check singleUseProcesses for ${n.group}"

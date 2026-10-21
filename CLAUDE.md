@@ -225,8 +225,13 @@ on the `transfer` queue; it is not in the registry, which is why it is a profile
 main `plugins {}` block). A task whose downstream lineage all succeeded keeps only `.command.*`
 and `.exitcode`; everything upstream of a final failure, and every task of the failed sample, is
 left intact, and `<outdir>/cleanup/rerun.tsv` lists those samples for a `-resume`. `_STARtmp`
-goes whatever the outcome. `dryRun = true` in `configs/lineage_keep.config` until a batch has been
-checked. Publishing hard-links, so emptying a work dir frees only what was never published —
+goes whatever the outcome. The failed task's *own* attempts are the exception
+(`cleanRetriedAttempts`, `cleanFailedTasks`): they are emptied as they end, keeping logs,
+symlinks and files under 1 MB, because `-resume` never reuses a failed attempt. Their
+directories must survive, though — `-resume` reaches attempt n+1's cache only through attempt
+n's directory — so never `rm -rf` a failed work dir by hand either. Live since 2026-10-20
+(`dryRun = false`; a *missing* `dryRun` means `true`, which is how batches 26-27 filled the
+quota). Publishing hard-links, so emptying a work dir frees only what was never published —
 `deleted.tsv`'s `freed_bytes` says how much. `--no_raw` stops publishing `raw/`, which is what
 makes the FASTQs actually go. If you add a process, decide whether it belongs in
 `singleUseProcesses` (each upstream file read by exactly one of its tasks) or `barrierProcesses`

@@ -88,6 +88,44 @@ class WorkDirCleanerTest extends Specification {
         Files.list(d).count() == 0
     }
 
+    def 'a failed attempt keeps its logs, small files and symlinks, and the directory itself'() {
+        given:
+        final d = workDir()
+        final tsv = tmp.resolve('log/deleted.tsv')
+        final cleaner = new WorkDirCleaner(tsv, false, true)
+
+        when:
+        final s = cleaner.cleanFailed(d, 500, 'failed', 'P', 'P (1)', 'ab/cdef')
+        cleaner.close()
+
+        then:
+        Files.isDirectory(d)
+        Files.exists(d.resolve('.command.err'))
+        Files.exists(d.resolve('out.fastq.gz'))                 // 100 B, under the threshold
+        Files.exists(d.resolve('S1/Log.final.out'))             // nested, under the threshold
+        Files.isSymbolicLink(d.resolve('in.fastq.gz'))
+        !Files.exists(d.resolve('S1/_STARtmp'))                 // the 1000 B file and its emptied dirs
+        s.bytes == 1000
+        s.freed == 1000
+        Files.readAllLines(tsv)[1].split('\t')[1] == 'failed'
+    }
+
+    def 'a dry run of a failed attempt deletes nothing and is recorded as such'() {
+        given:
+        final d = workDir()
+        final tsv = tmp.resolve('log/deleted.tsv')
+        final cleaner = new WorkDirCleaner(tsv, true, true)
+
+        when:
+        final s = cleaner.cleanFailed(d, 500, 'retried', 'P', 'P (1)', 'ab/cdef')
+        cleaner.close()
+
+        then:
+        Files.exists(d.resolve('S1/_STARtmp/sub/big'))
+        s.bytes == 1000
+        Files.readAllLines(tsv)[1].split('\t')[1] == 'dry-run-retried'
+    }
+
     def 'held outputs survive the clean, and their parent directories with them, until removed'() {
         given:
         final d = workDir()
