@@ -55,6 +55,10 @@ nextflow run main.nf -profile sanger,lineage_keep --datasets datasets.tsv --star
 
 - A cleaned work directory keeps only `.command.*` and `.exitcode`.
 - Every task upstream of a final failure, and every task of the failed sample, is kept intact.
+- The failed attempts themselves are the exception: a retried attempt, and every attempt of a
+  task that failed for good, is emptied as it ends, keeping its logs, symlinks and files under
+  1 MB. `-resume` never reuses a failed attempt, but it reaches a later attempt's cache through
+  the earlier attempt's directory, so the directories stay — never delete one by hand.
 - STAR's `_STARtmp` is removed whatever the outcome; it is never needed.
 - `<outdir>/cleanup/` gets `deleted.tsv` (every directory cleaned, with the bytes freed),
   `failed_tasks.tsv`, and **`rerun.tsv`** — a `--datasets` table of just the failed samples.
