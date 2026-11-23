@@ -14,7 +14,9 @@ have the full notes for each.
 1. TOC
 {:toc}
 
-## Unreleased
+## 26-327 — 2026-11-23
+
+BAM samples whose BAMs repeat lanes no longer abort the run.
 
 ### Changed
 - `WGET10X` asks for 4 GB and 1 cpu.
