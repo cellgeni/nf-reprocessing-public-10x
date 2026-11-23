@@ -14,6 +14,27 @@ have the full notes for each.
 1. TOC
 {:toc}
 
+## 26-327 — 2026-11-23
+
+BAM samples whose BAMs repeat lanes no longer abort the run.
+
+### Changed
+- `WGET10X` asks for 4 GB and 1 cpu.
+- BAM-derived run FASTQs are named after the run, not the sample: `raw/<dataset>/fastq/` and
+  `raw/<dataset>/runs/` now hold `<run>_S1_L001_R1_001.fastq.gz` for a BAM run, as they already
+  did for FASTQ and SRA runs. The merged FASTQs in `renamed_fastq/`, which the aligners read, are
+  named as before.
+
+### Fixed
+- **A sample whose BAMs repeat lane numbers no longer aborts the whole run**
+  ([#41](https://github.com/cellgeni/nf-reprocessing-public-10x/issues/41)). `REPROCESS10X_BAM2FASTQ`
+  named every BAM's FASTQs `<sample>_S1_<lane>_…`, so two BAMs of one sample on the same lane
+  produced the same file names. ArrayExpress often submits a sample as one BAM per library and
+  lane, as E-MTAB-8322 does. `RENAME10XSAMPLE` could not stage them, and Nextflow stops the run on
+  an input file name collision before `errorStrategy` sees it. Each run now gets its own lane in
+  the merged FASTQs. On a `-resume` of a run started with an earlier release, every BAM2FASTQ task
+  runs again, as do the downstream tasks of samples with BAM runs.
+
 ## 26-294 — 2026-10-21
 
 Runs anywhere: `docker`, `singularity` and `sanger` profiles, resources by label, launch checks,

@@ -1,18 +1,23 @@
 #!/bin/bash
 
 # Script to rename and move FASTQ files from bamtofastq output
-# Usage: rename_fastqs.sh <source_dir> <sample_name> <target_dir>
+# Usage: rename_fastqs.sh <prefix> <source_dir> <target_dir>
+#
+# <prefix> is the run accession. The output is run-level, <run>_S<n>_<lane>_<read>_001.fastq.gz,
+# like RENAME10XRUN's; RENAME10XSAMPLE gives it the sample's name later. The prefix must not be
+# the sample: <n> restarts at 1 for every BAM, so two BAMs of one sample on the same lane would
+# produce identical names, which RENAME10XSAMPLE cannot stage (GitHub #41).
 
 set -euo pipefail
 
 # Check if correct number of arguments provided
 if [ $# -ne 3 ]; then
-    echo "Usage: $0 <sample_name> <source_dir> <target_dir>"
+    echo "Usage: $0 <prefix> <source_dir> <target_dir>"
     echo "Example: $0 SRR30256650 /path/to/source /path/to/target"
     exit 1
 fi
 
-SAMPLE_NAME="$1"
+PREFIX="$1"
 SOURCE_DIR="$2"
 TARGET_DIR="$3"
 
@@ -27,7 +32,7 @@ mkdir -p "$TARGET_DIR"
 
 echo "Renaming and moving FASTQ files..."
 echo "Source: $SOURCE_DIR"
-echo "Sample: $SAMPLE_NAME"
+echo "Prefix: $PREFIX"
 echo "Target: $TARGET_DIR"
 
 # Ensure target directory exists
@@ -53,8 +58,8 @@ for subdir in "$SOURCE_DIR"/*; do
                 if [[ "$original_filename" =~ bamtofastq_S1_(.+) ]]; then
                     original_suffix="${BASH_REMATCH[1]}"
                     
-                    # Create new filename: ${sample_name}_S${sample_number}_${original_suffix}
-                    new_filename="${SAMPLE_NAME}_S${sample_counter}_${original_suffix}"
+                    # Create new filename: ${prefix}_S${sample_number}_${original_suffix}
+                    new_filename="${PREFIX}_S${sample_counter}_${original_suffix}"
                     
                     # Move and rename the file
                     echo "  $original_filename -> $new_filename"
